@@ -1,6 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../database/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { MEDIA_PROVIDER } from '../providers/tokens';
+import type { MediaProvider } from '../providers/media-provider.interface';
+import { sign } from 'jsonwebtoken';
 
 /**
  * Result of provisioning SIP credentials for a domain user.
@@ -11,6 +15,7 @@ import { PrismaService } from '../database/prisma.service';
  * already has on file.
  */
 export interface SipCredentialsResult {
+  provider: 'janus' | 'livekit';
   username: string;
   password: string | null;
 }
@@ -51,6 +56,16 @@ export class SipService {
   readonly transport: 'udp' | 'tcp' | 'tls';
   /** Optional override for the registrar URL exposed to softphones. */
   readonly publicHost: string | null;
+  readonly provider: 'janus' | 'livekit';
+  readonly livekitSipHost: string;
+  readonly livekitSipPort: number;
+  readonly livekitSipTransport: 'udp' | 'tcp' | 'tls';
+  private readonly livekitApiUrl: string;
+  private readonly livekitApiKey: string;
+  private readonly livekitApiSecret: string;
+  private readonly livekitSharedUsername: string;
+  private readonly livekitSharedPassword: string;
+  private livekitSipConfigured = false;
 
   /** Reserved usernames that consumer-supplied domainUserIds must never collide with. */
   private static readonly RESERVED_USERNAMES = new Set([
@@ -61,15 +76,47 @@ export class SipService {
     'root',
   ]);
 
-  constructor(@Optional() private readonly prisma?: PrismaService) {
+  constructor(
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly redis?: RedisService,
+    @Optional() @Inject(MEDIA_PROVIDER) private readonly media?: MediaProvider,
+  ) {
     this.domain = process.env.SIP_DOMAIN ?? 'comms.local';
     this.registrarHost = process.env.SIP_REGISTRAR_HOST ?? 'comms-kamailio';
     this.registrarPort = Number(process.env.SIP_REGISTRAR_PORT ?? '5060');
     const transport = (process.env.SIP_TRANSPORT ?? 'udp').toLowerCase();
     this.transport = transport === 'tcp' || transport === 'tls' ? transport : 'udp';
     this.publicHost = process.env.SIP_PUBLIC_HOST?.trim() || null;
+    this.provider =
+      ((process.env.MEDIA_PROVIDER ?? this.media?.id ?? 'janus')
+        .trim()
+        .toLowerCase() === 'livekit')
+        ? 'livekit'
+        : 'janus';
+    this.livekitSipHost =
+      process.env.LIVEKIT_SIP_HOST?.trim() ||
+      this.hostnameFromUrl(
+        process.env.LIVEKIT_PUBLIC_URL ?? process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
+      ) ||
+      'localhost';
+    this.livekitSipPort = Number(process.env.LIVEKIT_SIP_PORT ?? '5060');
+    const livekitTransport = (process.env.LIVEKIT_SIP_TRANSPORT ?? 'udp').toLowerCase();
+    this.livekitSipTransport =
+      livekitTransport === 'tcp' || livekitTransport === 'tls'
+        ? livekitTransport
+        : 'udp';
+    this.livekitApiUrl = this.normalizeLivekitApiUrl(
+      process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
+    );
+    this.livekitApiKey = process.env.LIVEKIT_API_KEY ?? '';
+    this.livekitApiSecret = process.env.LIVEKIT_API_SECRET ?? '';
+    this.livekitSharedUsername =
+      process.env.LIVEKIT_SIP_USERNAME?.trim() || 'comms_sip';
+    this.livekitSharedPassword =
+      process.env.LIVEKIT_SIP_PASSWORD?.trim() ||
+      this.deriveLivekitSipPassword(process.env.INTERNAL_SERVICE_SECRET ?? 'change-me');
     this.logger.log(
-      `SipService configured: domain=${this.domain} registrar=${this.registrarHost}:${this.registrarPort}/${this.transport}`,
+      `SipService configured: provider=${this.provider} domain=${this.domain}`,
     );
   }
 
@@ -84,26 +131,57 @@ export class SipService {
   buildSessionDescriptor(
     creds: { username: string; password: string },
     roomContextId?: string | null,
+    roomTarget?: string | null,
   ): {
     status: 'available';
+    provider: 'janus' | 'livekit';
     username: string;
     password: string;
     registrar: string;
     domain: string;
     transport: 'udp' | 'tcp' | 'tls';
     roomUri?: string;
+    credentials: {
+      provider: 'janus' | 'livekit';
+      username: string;
+      password: string;
+      registrar: string;
+      domain: string;
+      transport: 'udp' | 'tcp' | 'tls';
+      roomUri?: string;
+    };
   } {
-    const host = this.publicHost ?? this.registrarHost;
+    const isLivekit = this.provider === 'livekit';
+    const host = isLivekit
+      ? this.livekitSipHost
+      : this.publicHost ?? this.registrarHost;
+    const port = isLivekit ? this.livekitSipPort : this.registrarPort;
+    const transport = isLivekit ? this.livekitSipTransport : this.transport;
+    const roomUri = roomTarget
+      ? `sip:${roomTarget}@${this.domain}`
+      : roomContextId
+        ? `sip:room-${roomContextId}@${this.domain}`
+        : undefined;
     const descriptor: ReturnType<SipService['buildSessionDescriptor']> = {
       status: 'available',
+      provider: this.provider,
       username: creds.username,
       password: creds.password,
-      registrar: `sip:${host}:${this.registrarPort};transport=${this.transport}`,
+      registrar: `sip:${host}:${port};transport=${transport}`,
       domain: this.domain,
-      transport: this.transport,
+      transport,
+      credentials: {
+        provider: this.provider,
+        username: creds.username,
+        password: creds.password,
+        registrar: `sip:${host}:${port};transport=${transport}`,
+        domain: this.domain,
+        transport,
+        roomUri,
+      },
     };
-    if (roomContextId) {
-      descriptor.roomUri = `sip:room-${roomContextId}@${this.domain}`;
+    if (roomUri) {
+      descriptor.roomUri = roomUri;
     }
     return descriptor;
   }
@@ -123,6 +201,16 @@ export class SipService {
     storedPassword: string | null,
     storedUsername: string | null,
   ): Promise<SipCredentialsResult | null> {
+    if (this.provider === 'livekit') {
+      const ready = await this.ensureLivekitInfrastructure();
+      if (!ready) return null;
+      return {
+        provider: 'livekit',
+        username: this.livekitSharedUsername,
+        password: this.livekitSharedPassword,
+      };
+    }
+
     if (!this.prisma) {
       this.logger.warn('SipService.ensureUserCredentials called without Prisma — degrading');
       return null;
@@ -145,7 +233,7 @@ export class SipService {
       await this.upsertKamailioSubscriber(username, storedPassword).catch(
         (err) => this.logger.warn(`Kamailio subscriber upsert failed for ${username}: ${err}`),
       );
-      return { username, password: null };
+      return { provider: 'janus', username, password: null };
     }
 
     // First-time provisioning — mint a new password and write the
@@ -159,7 +247,7 @@ export class SipService {
       );
       return null;
     }
-    return { username, password: newPassword };
+    return { provider: 'janus', username, password: newPassword };
   }
 
   /**
@@ -167,6 +255,7 @@ export class SipService {
    * are logged but never throw, mirroring the Matrix logout pattern.
    */
   async deprovisionUser(username: string): Promise<void> {
+    if (this.provider === 'livekit') return;
     if (!this.prisma || !username) return;
     try {
       await this.prisma.$executeRawUnsafe(
@@ -234,17 +323,163 @@ export class SipService {
 
   /** HA1 = MD5(username:realm:password). Standard SIP DIGEST. */
   private computeHa1(username: string, realm: string, password: string): string {
-    return require('crypto')
-      .createHash('md5')
+    return createHash('md5')
       .update(`${username}:${realm}:${password}`)
       .digest('hex');
   }
 
   /** HA1B = MD5(username@realm:realm:password). Used by some SIP clients. */
   private computeHa1b(username: string, realm: string, password: string): string {
-    return require('crypto')
-      .createHash('md5')
+    return createHash('md5')
       .update(`${username}@${realm}:${realm}:${password}`)
       .digest('hex');
+  }
+
+  async ensureLivekitInfrastructure(): Promise<boolean> {
+    if (this.provider !== 'livekit') return false;
+    if (this.livekitSipConfigured) return true;
+    if (!this.livekitApiKey || !this.livekitApiSecret) {
+      this.logger.warn('LiveKit SIP unavailable: missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET');
+      return false;
+    }
+
+    const cacheKey = 'comms:livekit:sip:configured';
+    if (this.redis?.isReady()) {
+      const cached = await this.redis.get(cacheKey);
+      if (cached === '1') {
+        this.livekitSipConfigured = true;
+        return true;
+      }
+    }
+
+    try {
+      await this.createLivekitInboundTrunkIfNeeded();
+      await this.createLivekitDispatchRuleIfNeeded();
+      this.livekitSipConfigured = true;
+      if (this.redis?.isReady()) {
+        await this.redis.set(cacheKey, '1');
+      }
+      return true;
+    } catch (err) {
+      this.logger.error(`Failed to configure LiveKit SIP: ${err}`);
+      return false;
+    }
+  }
+
+  private async createLivekitInboundTrunkIfNeeded(): Promise<void> {
+    const name = process.env.LIVEKIT_SIP_TRUNK_NAME ?? 'comms-softphone-inbound';
+    const body = {
+      name,
+      numbers: [],
+      authUsername: this.livekitSharedUsername,
+      authPassword: this.livekitSharedPassword,
+      auth_username: this.livekitSharedUsername,
+      auth_password: this.livekitSharedPassword,
+    };
+
+    await this.callLivekitSip('CreateSIPInboundTrunk', body).catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('already exists')) return;
+      try {
+        const existing = await this.callLivekitSip('ListSIPInboundTrunk', {});
+        const items = existing?.items ?? existing?.inboundTrunks ?? [];
+        if (Array.isArray(items) && items.some((item: any) => item.name === name)) {
+          return;
+        }
+      } catch {
+        // ignore and rethrow original
+      }
+      throw err;
+    });
+  }
+
+  private async createLivekitDispatchRuleIfNeeded(): Promise<void> {
+    const name = process.env.LIVEKIT_SIP_DISPATCH_RULE_NAME ?? 'comms-room-dispatch';
+    const body = {
+      rule: {
+        dispatchRuleCallee: {
+          roomPrefix: '',
+          randomize: false,
+        },
+      },
+      name,
+    };
+
+    await this.callLivekitSip('CreateSIPDispatchRule', body).catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('already exists')) return;
+      try {
+        const existing = await this.callLivekitSip('ListSIPDispatchRule', {});
+        const items = existing?.items ?? existing?.dispatchRules ?? [];
+        if (Array.isArray(items) && items.some((item: any) => item.name === name)) {
+          return;
+        }
+      } catch {
+        // ignore and rethrow original
+      }
+      throw err;
+    });
+  }
+
+  private async callLivekitSip(
+    method: string,
+    body: Record<string, unknown>,
+  ): Promise<any> {
+    const response = await fetch(`${this.livekitApiUrl}/twirp/livekit.SIP/${method}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.createLivekitServerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`LiveKit SIP ${method} failed (${response.status}): ${text}`);
+    }
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  }
+
+  private createLivekitServerToken(): string {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    return sign(
+      {
+        iss: this.livekitApiKey,
+        nbf: nowSeconds - 10,
+        exp: nowSeconds + 60,
+        sip: { admin: true, call: true },
+        video: { roomAdmin: true, roomCreate: true },
+      },
+      this.livekitApiSecret,
+      { algorithm: 'HS256' },
+    );
+  }
+
+  private hostnameFromUrl(rawUrl: string): string | null {
+    try {
+      return new URL(rawUrl).hostname || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private normalizeLivekitApiUrl(rawUrl: string): string {
+    try {
+      const url = new URL(rawUrl);
+      url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+      url.pathname = '';
+      url.search = '';
+      url.hash = '';
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return rawUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:').replace(/\/$/, '');
+    }
+  }
+
+  private deriveLivekitSipPassword(seed: string): string {
+    return createHash('sha256').update(`livekit-sip:${seed}`).digest('hex').slice(0, 32);
   }
 }

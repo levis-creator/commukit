@@ -1,0 +1,18 @@
+# LiveKit SIP dev config.
+#
+# This sidecar is separate from `livekit-server`. For local Docker Compose we
+# run it in host network mode so RTP and SIP ports are reachable directly from
+# the host machine and softphones can dial the service without another proxy.
+
+api_key: devkey
+api_secret: change-me-livekit-secret
+ws_url: ws://127.0.0.1:7880
+
+redis:
+  address: 127.0.0.1:6379
+
+sip_port: 5060
+rtp_port: 12000
+
+logging:
+  level: info

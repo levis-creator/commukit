@@ -162,7 +162,7 @@ The Docker Compose stack gates optional infrastructure behind profiles:
 | `chat` | `synapse` | Matrix chat | `MATRIX_ENABLED=true` |
 | `media` | `janus-gateway`, `coturn` | Janus audio and video | `JANUS_ENABLED=true` |
 | `sip` | `kamailio` | SIP softphones into AudioBridge | `SIP_ENABLED=true` |
-| `livekit` | `livekit` | Reserved infrastructure slot only | `MEDIA_PROVIDER=livekit` |
+| `livekit` | `livekit`, `livekit-sip` | LiveKit media + SIP backend | `MEDIA_PROVIDER=livekit` |
 
 Examples:
 
@@ -179,7 +179,7 @@ COMPOSE_PROFILES=chat,media docker compose up -d
 # Everything supported today, including SIP
 COMPOSE_PROFILES=chat,media,sip docker compose up -d
 
-# LiveKit infrastructure scaffold only
+# LiveKit media backend
 COMPOSE_PROFILES=chat,livekit docker compose up -d
 ```
 
@@ -191,10 +191,8 @@ The codebase is provider-oriented, but the practical support story today is:
 |---|---|---|
 | `janus` | off | Supported |
 | `janus` | on | Supported |
-| `livekit` | off | Infrastructure scaffold only; no shipped NestJS media adapter yet |
-| `livekit` | on | Not supported; SIP bridge refuses boot with `incompatible-media` |
-
-Why the last row fails: the only shipped SIP bridge is Janus-specific and can only route calls into a Janus AudioBridge. It cannot bridge into a LiveKit media plane.
+| `livekit` | off | Supported |
+| `livekit` | on | Supported with LiveKit SIP ingress / dispatch configuration |
 
 ## Configuration
 
@@ -213,7 +211,7 @@ See [`.env.example`](.env.example) for the full template. The most important gro
 | Janus | `JANUS_HTTP_URL`, `JANUS_WS_URL`, `JANUS_PUBLIC_WS_URL`, `JANUS_ICE_SERVERS` |
 | TURN | `TURN_USERNAME`, `TURN_PASSWORD`, `TURN_REALM`, `TURN_EXTERNAL_IP` |
 | SIP | `SIP_DOMAIN`, `SIP_REGISTRAR_HOST`, `SIP_BRIDGE_USERNAME`, `SIP_BRIDGE_PASSWORD` |
-| LiveKit scaffold | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
+| LiveKit | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_SIP_HOST`, `LIVEKIT_SIP_PORT`, `LIVEKIT_SIP_TRANSPORT`, `LIVEKIT_SIP_USERNAME`, `LIVEKIT_SIP_PASSWORD` |
 
 ## Health Semantics
 
@@ -434,8 +432,8 @@ vps-ke-communications-service/
 
 ## Practical Caveats
 
-- LiveKit support is not fully implemented yet, even though the repo contains scaffolding for it.
-- SIP plus LiveKit is not supported in the current codebase.
+- LiveKit media is supported through the pluggable `MEDIA_PROVIDER=livekit` path.
+- LiveKit SIP uses room-dial semantics through LiveKit SIP ingress and dispatch rules rather than the Janus/Kamailio per-user registrar model.
 - Graceful degradation is intentional. A booting server with unavailable capabilities is not necessarily broken.
 - Closing a room invalidates access, but transport-specific in-flight behavior still depends on backend realities.
 

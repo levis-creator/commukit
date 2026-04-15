@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { SipService } from './sip.service';
 import { SipBridgeService } from './sip-bridge.service';
+import { LivekitSipProvider } from './livekit-sip.provider';
 import { SIP_PROVIDER } from '../providers/tokens';
 
 /**
@@ -33,12 +34,10 @@ import { SIP_PROVIDER } from '../providers/tokens';
 @Module({
   providers: [
     SipService,
-    SipBridgeService,
-    // Bind the `SipProvider` DI token to the concrete Janus bridge. A
-    // future `LivekitSipProvider` would register a separate module and
-    // `AppModule` would pick one based on the `MEDIA_PROVIDER` env var.
-    { provide: SIP_PROVIDER, useExisting: SipBridgeService },
+    ...((process.env.MEDIA_PROVIDER ?? 'janus').trim().toLowerCase() === 'livekit'
+      ? [LivekitSipProvider, { provide: SIP_PROVIDER, useExisting: LivekitSipProvider }]
+      : [SipBridgeService, { provide: SIP_PROVIDER, useExisting: SipBridgeService }]),
   ],
-  exports: [SipService, SipBridgeService, SIP_PROVIDER],
+  exports: [SipService, SIP_PROVIDER],
 })
 export class SipModule {}

@@ -22,13 +22,13 @@ export interface IceServerConfig {
 }
 
 export interface AudioParticipant {
-  id: number;
+  id: string | number;
   display: string;
   muted: boolean;
 }
 
 export interface VideoParticipant {
-  id: number;
+  id: string | number;
   display: string;
 }
 
@@ -72,10 +72,10 @@ export interface MediaProvider {
   listParticipants(roomId: number): Promise<AudioParticipant[]>;
   listVideoParticipants(roomId: number): Promise<VideoParticipant[]>;
 
-  muteParticipant(roomId: number, participantId: number): Promise<boolean>;
-  unmuteParticipant(roomId: number, participantId: number): Promise<boolean>;
+  muteParticipant(roomId: number, participantId: string | number): Promise<boolean>;
+  unmuteParticipant(roomId: number, participantId: string | number): Promise<boolean>;
   muteRoom(roomId: number): Promise<boolean>;
 
-  kickAudioParticipant(roomId: number, participantId: number): Promise<boolean>;
-  kickVideoParticipant(roomId: number, participantId: number): Promise<boolean>;
+  kickAudioParticipant(roomId: number, participantId: string | number): Promise<boolean>;
+  kickVideoParticipant(roomId: number, participantId: string | number): Promise<boolean>;
 }

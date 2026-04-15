@@ -4,6 +4,7 @@ import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { MatrixModule } from './matrix/matrix.module';
 import { JanusModule } from './janus/janus.module';
+import { LivekitModule } from './livekit/livekit.module';
 import { SipModule } from './sip/sip.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { UsersModule } from './users/users.module';
@@ -22,6 +23,13 @@ const isEnabled = (key: string, fallback: 'true' | 'false'): boolean =>
 const matrixEnabled = isEnabled('MATRIX_ENABLED', 'true');
 const janusEnabled = isEnabled('JANUS_ENABLED', 'true');
 const sipEnabled = isEnabled('SIP_ENABLED', 'false');
+const mediaProvider = (process.env.MEDIA_PROVIDER ?? 'janus').trim().toLowerCase();
+const mediaImports =
+  mediaProvider === 'livekit'
+    ? [LivekitModule]
+    : janusEnabled
+      ? [JanusModule]
+      : [];
 
 @Module({
   imports: [
@@ -38,7 +46,7 @@ const sipEnabled = isEnabled('SIP_ENABLED', 'false');
     // When disabled, the module is not imported, so the corresponding service
     // is never instantiated and `@Optional()` consumers see `undefined`.
     ...(matrixEnabled ? [MatrixModule] : []),
-    ...(janusEnabled ? [JanusModule] : []),
+    ...mediaImports,
     ...(sipEnabled ? [SipModule] : []),
   ],
 })

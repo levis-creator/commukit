@@ -135,6 +135,7 @@ export interface VideoRoomSession extends CapabilityStatus {
  * Note: this is internal SIP federation — there is no PSTN connectivity.
  */
 export interface SipSession extends CapabilityStatus {
+  provider?: 'janus' | 'livekit';
   /** SIP username (DIGEST identifier). */
   username?: string;
   /** SIP password (DIGEST credential). Treat as a secret. */
@@ -147,6 +148,15 @@ export interface SipSession extends CapabilityStatus {
   transport?: 'udp' | 'tcp' | 'tls';
   /** Room SIP URI to dial, e.g. `sip:room-<contextId>@comms.local`. */
   roomUri?: string;
+  credentials?: {
+    provider: 'janus' | 'livekit';
+    username: string;
+    password: string;
+    registrar: string;
+    domain: string;
+    transport: 'udp' | 'tcp' | 'tls';
+    roomUri?: string;
+  };
 }
 
 /**
@@ -248,6 +258,22 @@ export class RoomsService {
     if (!this.media) return 'Media provider disabled';
     if (!this.media.isAvailable()) return 'Media provider unreachable';
     return null;
+  }
+
+  private isLivekitMediaProvider(
+    media: MediaProvider | undefined,
+  ): media is MediaProvider & {
+    id: 'livekit';
+    roomNameFor(roomId: number): string;
+    createParticipantToken(args: {
+      roomId: number;
+      identity: string;
+      name: string;
+      metadata?: Record<string, unknown>;
+      roomAdmin?: boolean;
+    }): Promise<string>;
+  } {
+    return !!media && media.id === 'livekit';
   }
 
   private sipUnavailableReason(): string | null {
@@ -402,6 +428,11 @@ export class RoomsService {
     // Best-effort cleanup of Janus VideoRoom (skipped when Janus disabled).
     if (this.media && room.janusVideoRoomId) {
       await this.media.destroyVideoRoom(contextId, room.janusVideoRoomId);
+    } else if (
+      this.isLivekitMediaProvider(this.media) &&
+      room.janusAudioRoomId
+    ) {
+      await this.media.destroyVideoRoom(contextId, room.janusAudioRoomId);
     }
 
     // Invalidate all active Matrix sessions for this room so members can't
@@ -538,7 +569,9 @@ export class RoomsService {
     // helper below will surface the misconfiguration to the caller, and
     // we don't want to persist SIP usernames/passwords for a code path
     // that will never successfully bridge a call.
-    let sipResult: { username: string; password: string | null } | null = null;
+    let sipResult:
+      | { provider: 'janus' | 'livekit'; username: string; password: string | null }
+      | null = null;
     const roomNeedsAudio =
       room.mode === RoomMode.IN_PERSON || room.mode === RoomMode.HYBRID;
     const sipBridgeUsable =
@@ -638,18 +671,43 @@ export class RoomsService {
       if (this.media && !janusReason) {
         const liveAudioRoomId = await this.media.ensureAudioBridgeRoom(room.contextId, room.janusAudioRoomId);
         if (liveAudioRoomId) {
-          audioBridge = {
-            status: 'available',
-            // Legacy flat fields (stripped for v2 clients).
-            roomId: liveAudioRoomId,
-            wsUrl: this.media.wsUrl,
-            // Phase 3 discriminated-union shape.
-            credentials: {
-              provider: 'janus',
+          if (this.isLivekitMediaProvider(this.media)) {
+            const token = await this.media.createParticipantToken({
+              roomId: liveAudioRoomId,
+              identity: dto.domainUserId,
+              name: dto.displayName,
+              metadata: {
+                appId: dto.appId,
+                contextId: room.contextId,
+                contextType: room.contextType,
+                mode: room.mode,
+                roles: dto.roles ?? [],
+              },
+              roomAdmin: !!dto.roles?.includes('MODERATOR'),
+            });
+            audioBridge = {
+              status: 'available',
+              credentials: {
+                provider: 'livekit',
+                room: this.media.roomNameFor(liveAudioRoomId),
+                url: this.media.wsUrl,
+                token,
+              },
+            };
+          } else {
+            audioBridge = {
+              status: 'available',
+              // Legacy flat fields (stripped for v2 clients).
               roomId: liveAudioRoomId,
               wsUrl: this.media.wsUrl,
-            },
-          };
+              // Phase 3 discriminated-union shape.
+              credentials: {
+                provider: 'janus',
+                roomId: liveAudioRoomId,
+                wsUrl: this.media.wsUrl,
+              },
+            };
+          }
         } else {
           audioBridge = { status: 'unavailable', reason: 'AudioBridge room could not be provisioned' };
         }
@@ -669,20 +727,46 @@ export class RoomsService {
         const liveVideoRoomId = await this.media.ensureVideoRoom(room.contextId, room.janusVideoRoomId);
         if (liveVideoRoomId) {
           const iceServers = this.media.buildIceServers();
-          videoRoom = {
-            status: 'available',
-            // Legacy flat fields (stripped for v2 clients).
-            roomId: liveVideoRoomId,
-            wsUrl: this.media.wsUrl,
-            iceServers,
-            // Phase 3 discriminated-union shape.
-            credentials: {
-              provider: 'janus',
+          if (this.isLivekitMediaProvider(this.media)) {
+            const token = await this.media.createParticipantToken({
+              roomId: liveVideoRoomId,
+              identity: dto.domainUserId,
+              name: dto.displayName,
+              metadata: {
+                appId: dto.appId,
+                contextId: room.contextId,
+                contextType: room.contextType,
+                mode: room.mode,
+                roles: dto.roles ?? [],
+              },
+              roomAdmin: !!dto.roles?.includes('MODERATOR'),
+            });
+            videoRoom = {
+              status: 'available',
+              credentials: {
+                provider: 'livekit',
+                room: this.media.roomNameFor(liveVideoRoomId),
+                url: this.media.wsUrl,
+                token,
+                iceServers,
+              },
+            };
+          } else {
+            videoRoom = {
+              status: 'available',
+              // Legacy flat fields (stripped for v2 clients).
               roomId: liveVideoRoomId,
               wsUrl: this.media.wsUrl,
               iceServers,
-            },
-          };
+              // Phase 3 discriminated-union shape.
+              credentials: {
+                provider: 'janus',
+                roomId: liveVideoRoomId,
+                wsUrl: this.media.wsUrl,
+                iceServers,
+              },
+            };
+          }
         } else {
           videoRoom = { status: 'unavailable', reason: 'VideoRoom could not be provisioned' };
         }
@@ -705,9 +789,14 @@ export class RoomsService {
         // the cached value from the user row we updated above.
         const password = sipResult.password ?? commUser.sipPassword ?? null;
         if (password) {
+          const roomTarget =
+            this.isLivekitMediaProvider(this.media) && audioBridge?.credentials?.provider === 'livekit'
+              ? audioBridge.credentials.room
+              : null;
           sip = this.sip.buildSessionDescriptor(
             { username: sipResult.username, password },
             room.contextId,
+            roomTarget,
           );
         } else {
           sip = { status: 'unavailable', reason: 'SIP credential provisioning failed' };
@@ -797,7 +886,7 @@ export class RoomsService {
     contextId: string,
     appId: string,
     contextType: string,
-  ): Promise<Array<{ id: number; display: string; muted: boolean }>> {
+  ): Promise<Array<{ id: string | number; display: string; muted: boolean }>> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
     return janus.listParticipants(room.janusAudioRoomId!);
   }
@@ -931,7 +1020,7 @@ export class RoomsService {
     janus: MediaProvider,
     roomId: number,
     domainUserId: string,
-  ): Promise<number> {
+  ): Promise<string | number> {
     const participants = await janus.listParticipants(roomId);
 
     // Primary: exact match on structured suffix after '|'
@@ -968,7 +1057,7 @@ export class RoomsService {
     janus: MediaProvider,
     roomId: number,
     domainUserId: string,
-  ): Promise<number> {
+  ): Promise<string | number> {
     const participants = await janus.listVideoParticipants(roomId);
 
     const exactMatch = participants.find((p) => {

@@ -61,11 +61,15 @@ services:
       # Provider selection (Phase 1 abstraction — see src/providers/)
       MEDIA_PROVIDER: ${MEDIA_PROVIDER:-janus}
       CHAT_PROVIDER: ${CHAT_PROVIDER:-matrix}
-      # LiveKit (scaffold — only used when MEDIA_PROVIDER=livekit and
-      # the `livekit` compose profile is active)
+      # LiveKit media + SIP
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_SIP_HOST: ${LIVEKIT_SIP_HOST:-localhost}
+      LIVEKIT_SIP_PORT: ${LIVEKIT_SIP_PORT:-5060}
+      LIVEKIT_SIP_TRANSPORT: ${LIVEKIT_SIP_TRANSPORT:-udp}
+      LIVEKIT_SIP_USERNAME: ${LIVEKIT_SIP_USERNAME:-comms_sip}
+      LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -292,11 +296,9 @@ services:
       - comms-network
 
   # ── LiveKit (livekit profile) ──────────────────────────────────────────
-  # Alternative WebRTC media backend. Dormant by default — only starts when
+  # Alternative media backend. Dormant by default — only starts when
   # COMPOSE_PROFILES includes `livekit`. Pair with `MEDIA_PROVIDER=livekit`
-  # in .env. The `LivekitMediaService` adapter implementing MediaProvider
-  # is still TBD; this container reserves the port slots and config layout
-  # so a future adapter can land as a single-commit change.
+  # in .env.
   #
   # Note: LiveKit does not replace Matrix. Chat remains on the `chat`
   # profile regardless of which media backend is active.
@@ -317,6 +319,30 @@ services:
       - "50000-50100:50000-50100/udp"  # RTC media (disjoint from Janus 10000-10200)
     networks:
       - comms-network
+
+  livekit-sip:
+    image: livekit/sip:latest
+    container_name: comms-livekit-sip
+    profiles: ["livekit"]
+    restart: unless-stopped
+    network_mode: host
+    command: --config /etc/livekit-sip.yaml
+    volumes:
+      - ./infra/livekit/livekit-sip.yaml:/etc/livekit-sip.yaml:ro
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_secret: ${LIVEKIT_API_SECRET:-change-me-livekit-secret}
+        ws_url: ws://127.0.0.1:7880
+        redis:
+          address: 127.0.0.1:6379
+        sip_port: ${LIVEKIT_SIP_PORT:-5060}
+        rtp_port: 12000
+    depends_on:
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:

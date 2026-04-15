@@ -458,6 +458,41 @@ describe('RoomsService', () => {
       expect(session.videoRoom?.status).toBe('available');
       expect(session.videoRoom?.roomId).toBe(666);
     });
+
+    it('should return LiveKit credentials when the active media provider is livekit', async () => {
+      (prisma.communicationRoom.findUnique as jest.Mock).mockResolvedValue({
+        ...activeRoom,
+        mode: 'HYBRID',
+        janusAudioRoomId: 555,
+        janusVideoRoomId: 666,
+      });
+      (matrix.ensureUserToken as jest.Mock).mockResolvedValue({
+        accessToken: 'syt_token',
+        matrixUserId: '@parliament_user1:parliament.local',
+      });
+      (janus as any).id = 'livekit';
+      (janus as any).wsUrl = 'wss://livekit.example.com';
+      (janus as any).roomNameFor = jest.fn((roomId: number) => `comms-${roomId}`);
+      (janus as any).createParticipantToken = jest
+        .fn()
+        .mockResolvedValue('livekit.jwt.token');
+
+      const session = await service.authorizeUser('sitting-uuid-1', dto);
+
+      expect(session.audioBridge?.credentials).toEqual({
+        provider: 'livekit',
+        room: 'comms-555',
+        url: 'wss://livekit.example.com',
+        token: 'livekit.jwt.token',
+      });
+      expect(session.videoRoom?.credentials).toEqual({
+        provider: 'livekit',
+        room: 'comms-666',
+        url: 'wss://livekit.example.com',
+        token: 'livekit.jwt.token',
+        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+      });
+    });
   });
 
   // ── Multi-app isolation ────────────────────────────────────────────────────

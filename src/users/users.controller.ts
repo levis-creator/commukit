@@ -99,19 +99,23 @@ export class UsersController {
 
     // Persist any new fields back to the user row.
     const updates: Record<string, any> = {};
-    if (!commUser.sipUsername) updates.sipUsername = sipResult.username;
-    if (sipResult.password) updates.sipPassword = sipResult.password;
-    if (commUser.sipDisplayName !== dto.displayName) {
-      updates.sipDisplayName = dto.displayName;
-    }
-    if (Object.keys(updates).length > 0) {
-      commUser = await this.prisma.communicationUser.update({
-        where: { id: commUser.id },
-        data: updates,
-      });
+    if (sipResult.provider === 'janus') {
+      if (!commUser.sipUsername) updates.sipUsername = sipResult.username;
+      if (sipResult.password) updates.sipPassword = sipResult.password;
+      if (commUser.sipDisplayName !== dto.displayName) {
+        updates.sipDisplayName = dto.displayName;
+      }
+      if (Object.keys(updates).length > 0) {
+        commUser = await this.prisma.communicationUser.update({
+          where: { id: commUser.id },
+          data: updates,
+        });
+      }
     }
 
-    const password = sipResult.password ?? commUser.sipPassword;
+    const password =
+      sipResult.password ??
+      (sipResult.provider === 'janus' ? commUser.sipPassword : null);
     if (!password) {
       return { status: 'unavailable', reason: 'SIP credential provisioning failed' };
     }
@@ -119,6 +123,6 @@ export class UsersController {
     return this.sip.buildSessionDescriptor({
       username: sipResult.username,
       password,
-    });
+    }, null, null);
   }
 }

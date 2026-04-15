@@ -212,14 +212,14 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
    * Mute a single participant in an AudioBridge room (server-side enforcement).
    * Returns true on success; throws on failure.
    */
-  async muteParticipant(roomId: number, participantId: number): Promise<boolean> {
+  async muteParticipant(roomId: number, participantId: string | number): Promise<boolean> {
     if (!this.available) throw new Error('Janus Gateway unavailable');
 
     await this.withPluginHandle('janus.plugin.audiobridge', async (sessionId, handleId) => {
       const res = await this.httpPost(`/${sessionId}/${handleId}`, {
         janus: 'message',
         transaction: this.tx(),
-        body: { request: 'mute', room: roomId, id: participantId },
+        body: { request: 'mute', room: roomId, id: Number(participantId) },
       });
       const result = res?.plugindata?.data;
       if (result?.audiobridge !== 'success') {
@@ -235,14 +235,14 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
    * Unmute a single participant in an AudioBridge room (server-side enforcement).
    * Returns true on success; throws on failure.
    */
-  async unmuteParticipant(roomId: number, participantId: number): Promise<boolean> {
+  async unmuteParticipant(roomId: number, participantId: string | number): Promise<boolean> {
     if (!this.available) throw new Error('Janus Gateway unavailable');
 
     await this.withPluginHandle('janus.plugin.audiobridge', async (sessionId, handleId) => {
       const res = await this.httpPost(`/${sessionId}/${handleId}`, {
         janus: 'message',
         transaction: this.tx(),
-        body: { request: 'unmute', room: roomId, id: participantId },
+        body: { request: 'unmute', room: roomId, id: Number(participantId) },
       });
       const result = res?.plugindata?.data;
       if (result?.audiobridge !== 'success') {
@@ -311,14 +311,14 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
    * Kick a participant from an AudioBridge room.
    * The participant is immediately disconnected from the audio mix.
    */
-  async kickAudioParticipant(roomId: number, participantId: number): Promise<boolean> {
+  async kickAudioParticipant(roomId: number, participantId: string | number): Promise<boolean> {
     if (!this.available) throw new Error('Janus Gateway unavailable');
 
     await this.withPluginHandle('janus.plugin.audiobridge', async (sessionId, handleId) => {
       const res = await this.httpPost(`/${sessionId}/${handleId}`, {
         janus: 'message',
         transaction: this.tx(),
-        body: { request: 'kick', room: roomId, id: participantId },
+        body: { request: 'kick', room: roomId, id: Number(participantId) },
       });
       const result = res?.plugindata?.data;
       if (result?.audiobridge !== 'success') {
@@ -336,14 +336,14 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
    * Kick a participant from a VideoRoom.
    * The participant is immediately disconnected from the video session.
    */
-  async kickVideoParticipant(roomId: number, participantId: number): Promise<boolean> {
+  async kickVideoParticipant(roomId: number, participantId: string | number): Promise<boolean> {
     if (!this.available) throw new Error('Janus Gateway unavailable');
 
     await this.withPluginHandle('janus.plugin.videoroom', async (sessionId, handleId) => {
       const res = await this.httpPost(`/${sessionId}/${handleId}`, {
         janus: 'message',
         transaction: this.tx(),
-        body: { request: 'kick', room: roomId, id: participantId },
+        body: { request: 'kick', room: roomId, id: Number(participantId) },
       });
       const result = res?.plugindata?.data;
       if (result?.videoroom !== 'success') {

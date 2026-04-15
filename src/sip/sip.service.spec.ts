@@ -5,14 +5,30 @@ import { PrismaService } from '../database/prisma.service';
 describe('SipService', () => {
   let service: SipService;
   let prisma: { $executeRawUnsafe: jest.Mock };
+  const mockFetch = jest.fn();
+
+  beforeAll(() => {
+    global.fetch = mockFetch as any;
+  });
 
   beforeEach(async () => {
     // Reset env each test so they don't leak
+    delete process.env.MEDIA_PROVIDER;
     process.env.SIP_DOMAIN = 'comms.local';
     process.env.SIP_REGISTRAR_HOST = 'comms-kamailio';
     process.env.SIP_REGISTRAR_PORT = '5060';
     process.env.SIP_TRANSPORT = 'udp';
     delete process.env.SIP_PUBLIC_HOST;
+    delete process.env.LIVEKIT_SIP_HOST;
+    delete process.env.LIVEKIT_SIP_PORT;
+    delete process.env.LIVEKIT_SIP_TRANSPORT;
+    delete process.env.LIVEKIT_SIP_USERNAME;
+    delete process.env.LIVEKIT_SIP_PASSWORD;
+    process.env.LIVEKIT_URL = 'ws://livekit:7880';
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'secret';
+    process.env.INTERNAL_SERVICE_SECRET = 'internal-secret';
+    mockFetch.mockReset();
 
     prisma = {
       $executeRawUnsafe: jest.fn().mockResolvedValue(1),
@@ -26,6 +42,61 @@ describe('SipService', () => {
     }).compile();
 
     service = module.get(SipService);
+  });
+
+  describe('livekit provider', () => {
+    it('returns shared SIP credentials when MEDIA_PROVIDER=livekit', async () => {
+      process.env.MEDIA_PROVIDER = 'livekit';
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('{}') })
+        .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve('{}') });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          SipService,
+          { provide: PrismaService, useValue: prisma },
+        ],
+      }).compile();
+      const livekitService = module.get(SipService);
+
+      const result = await livekitService.ensureUserCredentials(
+        'myapp',
+        'user-1',
+        'Jane Doe',
+        null,
+        null,
+      );
+
+      expect(result).toEqual({
+        provider: 'livekit',
+        username: 'comms_sip',
+        password: expect.any(String),
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('builds a LiveKit SIP descriptor with room-specific SIP URI', async () => {
+      process.env.MEDIA_PROVIDER = 'livekit';
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          SipService,
+          { provide: PrismaService, useValue: prisma },
+        ],
+      }).compile();
+      const livekitService = module.get(SipService);
+
+      const descriptor = livekitService.buildSessionDescriptor(
+        { username: 'comms_sip', password: 'shared-secret' },
+        null,
+        'comms-123',
+      );
+
+      expect(descriptor.provider).toBe('livekit');
+      expect(descriptor.registrar).toBe('sip:livekit:5060;transport=udp');
+      expect(descriptor.roomUri).toBe('sip:comms-123@comms.local');
+      expect(descriptor.credentials.provider).toBe('livekit');
+    });
   });
 
   // ── Configuration & descriptor shape ───────────────────────────────────────
