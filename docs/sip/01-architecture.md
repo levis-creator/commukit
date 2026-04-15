@@ -73,7 +73,7 @@ Each comms room with an AudioBridge gets a SIP URI of the form:
 sip:room-<contextId>@<SIP_DOMAIN>
 ```
 
-Example: for a `SITTING` context with id `4f8a2b31-...`, the URI is
+Example: for a `MEETING` context with id `4f8a2b31-...`, the URI is
 `sip:room-4f8a2b31-...@comms.local`. The `room-` prefix is how
 Kamailio's routing logic recognizes an INVITE as a room-join request
 vs. a user-to-user call (the latter is not supported).

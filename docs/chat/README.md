@@ -11,6 +11,7 @@ Start here, then jump to the topic you need.
 | [04-persistence.md](04-persistence.md) | Store chat messages in your own database |
 | [05-security.md](05-security.md) | Review tokens, secrets, and room-visibility guarantees |
 | [06-troubleshooting.md](06-troubleshooting.md) | Diagnose a failing chat session |
+| [07-media-uploads.md](07-media-uploads.md) | Send images, files, and video through chat via object storage (S3/MinIO/Azure) |
 
 ## TL;DR
 
