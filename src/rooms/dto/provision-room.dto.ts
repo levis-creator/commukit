@@ -1,0 +1,79 @@
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+
+/**
+ * Transport configuration for a communications room. Drives which Janus
+ * rooms are provisioned:
+ *   - IN_PERSON → AudioBridge only
+ *   - REMOTE    → VideoRoom only
+ *   - HYBRID    → AudioBridge + VideoRoom
+ */
+export enum RoomMode {
+  IN_PERSON = 'IN_PERSON',
+  HYBRID = 'HYBRID',
+  REMOTE = 'REMOTE',
+  /** Chat-only: provisions a Matrix room with no Janus audio/video. */
+  CHAT = 'CHAT',
+}
+
+/** @deprecated Use [RoomMode]. Kept as an alias for one release cycle. */
+export const SittingMode = RoomMode;
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type SittingMode = RoomMode;
+
+export class ProvisionRoomDto {
+  @ApiProperty({
+    description: 'Unique identifier for the consumer application (e.g. "parliament").',
+    example: 'parliament',
+    maxLength: 64,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  appId: string;
+
+  @ApiProperty({
+    description: 'Domain entity type scoping this room (e.g. "sitting", "committee").',
+    example: 'sitting',
+    maxLength: 64,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  contextType: string;
+
+  @ApiProperty({
+    description: 'Unique identifier of the domain entity (e.g. the sitting UUID).',
+    example: 'sitting-uuid-1234',
+    maxLength: 128,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  contextId: string;
+
+  @ApiProperty({
+    description: 'Human-readable title used as the Matrix room name.',
+    example: '14th Parliament — Plenary Sitting #42',
+    maxLength: 200,
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  title: string;
+
+  @ApiProperty({
+    description:
+      'Transport mode controlling which Janus rooms are provisioned. ' +
+      'IN_PERSON → AudioBridge only; REMOTE → VideoRoom only; HYBRID → both.',
+    enum: RoomMode,
+    example: RoomMode.HYBRID,
+  })
+  @IsEnum(RoomMode)
+  mode: RoomMode;
+}

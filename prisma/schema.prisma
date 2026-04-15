@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Maps a domain user (from any consumer app) to a Matrix identity.
+/// One Matrix identity per domain user, shared across all apps.
+model CommunicationUser {
+  id           String   @id @default(uuid())
+  appId        String
+  domainUserId String
+  // Null when the Matrix account hasn't been provisioned yet (e.g. during
+  // an outage). Callers should treat null as "Matrix unavailable for this user".
+  matrixUserId String?  @unique
+  displayName  String
+
+  /// Last display name successfully pushed to Matrix. Used to skip the
+  /// Matrix PUT profile/displayname call when nothing has changed.
+  matrixDisplayName String?
+
+  /// Randomly-generated password for the Matrix account, stored for future
+  /// recovery logins. Null for legacy users provisioned under the old
+  /// deterministic-password scheme — those fall back to the legacy scheme
+  /// until the first successful rotation.
+  matrixPassword String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships CommunicationMembership[]
+
+  @@unique([appId, domainUserId])
+  @@index([appId])
+  @@map("communication_users")
+}
+
+/// A room provisioned for a domain context (e.g. a SITTING, MEETING, etc.).
+/// Room mode is immutable after creation.
+model CommunicationRoom {
+  id               String   @id @default(uuid())
+  appId            String
+  contextType      String
+  contextId        String
+  title            String
+  /// Transport mode: IN_PERSON, HYBRID, REMOTE — determines which Janus
+  /// rooms are provisioned. The DB column keeps its legacy `sittingMode`
+  /// name via @map so existing deployments don't need a data migration.
+  mode             String   @map("sittingMode")
+  status           String   @default("PROVISIONED") // PROVISIONED, ACTIVE, CLOSED, ARCHIVED
+  matrixRoomId     String?
+  janusAudioRoomId Int?
+  janusVideoRoomId Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  memberships CommunicationMembership[]
+  auditLogs   CommunicationAuditLog[]
+
+  @@unique([appId, contextType, contextId])
+  @@index([appId, contextType])
+  @@index([status])
+  @@map("communication_rooms")
+}
+
+/// Tracks which users have been authorized for which rooms.
+model CommunicationMembership {
+  id       String    @id @default(uuid())
+  roomId   String
+  userId   String
+  role     String    @default("PARTICIPANT") // PARTICIPANT, MODERATOR
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+
+  room CommunicationRoom @relation(fields: [roomId], references: [id])
+  user CommunicationUser @relation(fields: [userId], references: [id])
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@map("communication_memberships")
+}
+
+/// Immutable audit trail for room lifecycle events.
+model CommunicationAuditLog {
+  id          String   @id @default(uuid())
+  roomId      String
+  action      String   // ROOM_PROVISIONED, ROOM_ACTIVATED, ROOM_CLOSED, USER_AUTHORIZED, USER_LEFT
+  actorUserId String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  room CommunicationRoom @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+  @@index([action])
+  @@map("communication_audit_logs")
+}

@@ -1,0 +1,8 @@
+general: {
+	base_path = "/janus"
+	http = true
+	port = 8088
+	# HTTPS settings injected by entrypoint.sh when JANUS_CERT_PEM/KEY are set
+	##JANUS_HTTPS_ENABLED##
+	##JANUS_HTTPS_PORT##
+}

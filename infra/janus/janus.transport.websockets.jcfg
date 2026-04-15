@@ -1,0 +1,8 @@
+general: {
+	ws = true
+	ws_port = 8188
+	ws_path = "/janus"
+	# WSS settings injected by entrypoint.sh when JANUS_CERT_PEM/KEY are set
+	##JANUS_WSS_ENABLED##
+	##JANUS_WSS_PORT##
+}

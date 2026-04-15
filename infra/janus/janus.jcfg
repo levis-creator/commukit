@@ -1,0 +1,40 @@
+# Janus Gateway configuration for Communications Service (standalone)
+
+general: {
+	configs_folder = "/usr/local/etc/janus"
+	plugins_folder = "/usr/local/lib/janus/plugins"
+	transports_folder = "/usr/local/lib/janus/transports"
+	events_folder = "/usr/local/lib/janus/events"
+	loggers_folder = "/usr/local/lib/janus/loggers"
+	log_to_stdout = true
+	debug_level = 2
+	admin_secret = "janusoverlord"
+	string_ids = true
+}
+
+# TLS certificate paths — injected from JANUS_CERT_PEM / JANUS_CERT_KEY env vars.
+# When set, WSS (port 8989) and HTTPS (port 8089) are enabled automatically.
+certificates: {
+	##JANUS_CERT_PEM##
+	##JANUS_CERT_KEY##
+}
+
+media: {
+	rtp_port_range = "10000-10200"
+}
+
+nat: {
+	##STUN_SERVER##
+	##STUN_PORT##
+	##NAT_1_1_MAPPING##
+	##TURN_SERVER##
+	##TURN_PORT##
+	##TURN_TYPE##
+	##TURN_USER##
+	##TURN_PWD##
+}
+
+plugins: {}
+transports: {}
+loggers: {}
+events: {}

@@ -1,0 +1,48 @@
+# Matrix Synapse homeserver configuration for Communications Service
+# All values with ##PLACEHOLDER## are injected by entrypoint.sh from env vars.
+
+server_name: "##MATRIX_SERVER_NAME##"
+pid_file: /data/homeserver.pid
+
+listeners:
+  - port: 8020
+    bind_addresses: ['::']
+    tls: false
+    type: http
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: false
+
+database:
+  name: sqlite3
+  args:
+    database: /data/homeserver.db
+
+log_config: "/conf/synapse.log.config"
+media_store_path: "/data/media_store"
+signing_key_path: "/data/signing.key"
+
+trusted_key_servers:
+  - server_name: "matrix.org"
+suppress_key_server_warning: true
+
+registration_shared_secret: "##MATRIX_REGISTRATION_SHARED_SECRET##"
+enable_registration: true
+enable_registration_without_verification: true
+allow_guest_access: false
+
+rc_message:
+  per_second: 10
+  burst_count: 50
+rc_registration:
+  per_second: 5
+  burst_count: 20
+
+default_room_version: "10"
+
+# Enable end-to-end encryption by default for all newly created rooms.
+encryption_enabled_by_default_for_room_type: "all"
+
+federation_domain_whitelist: []
+report_stats: false
