@@ -1,19 +1,26 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
+import type { MediaProvider } from '../providers/media-provider.interface';
 
 /**
- * JanusService — owns Janus Gateway AudioBridge + VideoRoom provisioning.
+ * JanusService — Janus Gateway implementation of the `MediaProvider` contract.
  *
- * Owns Janus Gateway AudioBridge + VideoRoom provisioning for the communications layer.
- * Provides idempotent room creation, health monitoring, and ICE server config.
+ * Owns Janus Gateway AudioBridge + VideoRoom provisioning for the communications
+ * layer. Provides idempotent room creation, health monitoring, and ICE server
+ * config.
  *
  * Transport mapping (based on the room's mode):
  *   IN_PERSON → AudioBridge only
  *   HYBRID    → AudioBridge + VideoRoom
  *   REMOTE    → VideoRoom only
+ *
+ * **SIP plugin helpers** (below) are intentionally NOT part of `MediaProvider` —
+ * SIP is Janus-specific and consumed directly by `SipBridgeService`.
  */
 @Injectable()
-export class JanusService implements OnModuleInit, OnModuleDestroy {
+export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestroy {
+  readonly id = 'janus' as const;
+
   private readonly logger = new Logger(JanusService.name);
 
   private readonly httpUrl: string;
@@ -249,7 +256,7 @@ export class JanusService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Mute ALL participants in an AudioBridge room simultaneously.
-   * Used for emergency mute, voting lockdown, and sitting adjournment.
+   * Used for emergency mute, moderator lockdown, and room adjournment.
    */
   async muteRoom(roomId: number): Promise<boolean> {
     if (!this.available) throw new Error('Janus Gateway unavailable');
@@ -373,6 +380,101 @@ export class JanusService implements OnModuleInit, OnModuleDestroy {
     });
 
     return participants;
+  }
+
+  // ── SIP Plugin (low-level helpers) ─────────────────────────────────────────
+  //
+  // Unlike AudioBridge and VideoRoom which use per-operation ephemeral
+  // sessions via `withPluginHandle`, the SIP plugin requires long-lived
+  // state because SIP REGISTER and per-call handles outlive any single
+  // HTTP request. The state itself (sessionId + handleIds + per-call
+  // tracking) lives in SipBridgeService; JanusService only exposes the
+  // thin HTTP helpers that the bridge composes into full flows.
+  //
+  // All methods return raw Janus responses and throw on non-2xx. The
+  // caller is responsible for inspecting plugindata.data to interpret
+  // plugin-specific fields (sip, audiobridge, etc.).
+
+  /** Creates a new Janus session. Returns the sessionId. */
+  async sipCreateSession(): Promise<string> {
+    if (!this.available) throw new Error('Janus Gateway unavailable');
+    const res = await this.httpPost('', { janus: 'create', transaction: this.tx() });
+    const sessionId = res?.data?.id as string | undefined;
+    if (!sessionId) throw new Error('Failed to create Janus SIP session');
+    return sessionId;
+  }
+
+  /** Attaches a plugin (janus.plugin.sip or janus.plugin.audiobridge) to
+   *  an existing session. Returns the handleId. */
+  async sipAttachHandle(
+    sessionId: string,
+    plugin: 'janus.plugin.sip' | 'janus.plugin.audiobridge',
+  ): Promise<string> {
+    const res = await this.httpPost(`/${sessionId}`, {
+      janus: 'attach',
+      plugin,
+      transaction: this.tx(),
+    });
+    const handleId = res?.data?.id as string | undefined;
+    if (!handleId) throw new Error(`Failed to attach ${plugin}`);
+    return handleId;
+  }
+
+  /** Sends a plugin message to a SIP handle. Returns the raw Janus
+   *  response — async plugin events arrive separately via long-poll. */
+  async sipSendMessage(
+    sessionId: string,
+    handleId: string,
+    body: Record<string, any>,
+    jsep?: Record<string, any>,
+  ): Promise<any> {
+    const payload: Record<string, any> = {
+      janus: 'message',
+      transaction: this.tx(),
+      body,
+    };
+    if (jsep) payload.jsep = jsep;
+    return this.httpPost(`/${sessionId}/${handleId}`, payload);
+  }
+
+  /** Long-polls for async events on a session. `maxev` caps how many
+   *  events we pick up per call. Returns an array of events; empty
+   *  array means the poll timed out with nothing new. */
+  async sipLongPoll(sessionId: string, maxev = 5): Promise<any[]> {
+    try {
+      const res = await fetch(
+        `${this.httpUrl}/${sessionId}?maxev=${maxev}`,
+        { method: 'GET' },
+      );
+      if (!res.ok) {
+        if (res.status === 404) {
+          // Session expired — caller will recreate
+          throw new Error('SIP session expired');
+        }
+        throw new Error(`Janus long-poll ${res.status}`);
+      }
+      const body = await res.json();
+      // Janus long-poll returns either a single event object or an
+      // array depending on server version. Normalize to array.
+      if (Array.isArray(body)) return body;
+      if (body && typeof body === 'object') return [body];
+      return [];
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  /** Keepalive to prevent Janus from timing out the session (60s default). */
+  async sipKeepalive(sessionId: string): Promise<void> {
+    await this.httpPost(`/${sessionId}`, {
+      janus: 'keepalive',
+      transaction: this.tx(),
+    });
+  }
+
+  /** Destroys a Janus session. Best-effort — errors are swallowed. */
+  async sipDestroySession(sessionId: string): Promise<void> {
+    await this.httpDelete(`/${sessionId}`).catch(() => {});
   }
 
   // ── Private ────────────────────────────────────────────────────────────────

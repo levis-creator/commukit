@@ -133,4 +133,41 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Redis del failed for ${key}: ${err?.message ?? err}`);
     }
   }
+
+  /**
+   * Enumerates all keys matching a glob-style pattern via Redis SCAN.
+   *
+   * Prefer SCAN over KEYS in production because KEYS blocks the single
+   * Redis thread for the full iteration, which can freeze the server on
+   * large keyspaces. SCAN is cursor-based and non-blocking.
+   *
+   * Returns an empty array when Redis is unavailable (consistent with
+   * the rest of this service's graceful-degradation contract).
+   *
+   * Example: `scanKeys('janus:sip:call:*')` → every active SIP call key.
+   */
+  async scanKeys(pattern: string, batchSize = 100): Promise<string[]> {
+    if (!this.client) return [];
+    const found: string[] = [];
+    try {
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          batchSize,
+        );
+        cursor = nextCursor;
+        if (keys.length) found.push(...keys);
+      } while (cursor !== '0');
+      return found;
+    } catch (err: any) {
+      this.logger.warn(
+        `Redis scanKeys failed for pattern ${pattern}: ${err?.message ?? err}`,
+      );
+      return found;
+    }
+  }
 }

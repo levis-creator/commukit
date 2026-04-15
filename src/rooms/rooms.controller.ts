@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Query,
@@ -16,11 +17,24 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { InternalJwtGuard } from '../auth/internal-jwt.guard';
-import { RoomsService } from './rooms.service';
+import { RoomsService, stripLegacySessionFields } from './rooms.service';
 import { ProvisionRoomDto } from './dto/provision-room.dto';
 import { RoomLifecycleDto } from './dto/room-lifecycle.dto';
 import { MicControlDto } from './dto/mic-control.dto';
 import { AuthorizeUserDto } from './dto/authorize-user.dto';
+
+/** Request header consumers send to opt in to the v2 session response shape. */
+const API_VERSION_HEADER = 'x-comms-api-version';
+
+/**
+ * Parses the `X-Comms-API-Version` header. Missing, empty, `0`, or `1`
+ * values → legacy (v1) shape. Anything ≥ 2 → strip legacy fields.
+ */
+function isV2OrHigher(header: string | undefined): boolean {
+  if (!header) return false;
+  const parsed = parseInt(header, 10);
+  return Number.isFinite(parsed) && parsed >= 2;
+}
 
 /**
  * Internal API endpoints for communications room management.
@@ -60,8 +74,8 @@ export class RoomsController {
     summary: 'Activate a provisioned room',
     description:
       'Transitions a room from PROVISIONED → ACTIVE. Call this when the ' +
-      'domain session (e.g. a sitting) formally begins. Publishes a ' +
-      '`communications.room.activated` event on RabbitMQ.',
+      'domain entity (meeting, session, conversation, etc.) formally begins. ' +
+      'Publishes a `communications.room.activated` event on RabbitMQ.',
   })
   @ApiParam({ name: 'contextId', description: 'The domain entity ID used when provisioning the room.' })
   @ApiResponse({ status: 201, description: 'Room is now ACTIVE.' })
@@ -126,8 +140,13 @@ export class RoomsController {
   async authorizeUser(
     @Param('contextId') contextId: string,
     @Body() dto: AuthorizeUserDto,
+    @Headers(API_VERSION_HEADER) apiVersionHeader?: string,
   ) {
-    return this.roomsService.authorizeUser(contextId, dto);
+    const session = await this.roomsService.authorizeUser(contextId, dto);
+    if (isV2OrHigher(apiVersionHeader)) {
+      stripLegacySessionFields(session);
+    }
+    return session;
   }
 
   // Chat history proxy removed — clients paginate directly against Matrix
@@ -200,7 +219,7 @@ export class RoomsController {
     description:
       "Sets `leftAt` on the user's membership record. Any subsequent call to " +
       '`/authorize-user` for this user in this context will return 403. ' +
-      'Used when a participant is removed from a session (e.g. ejected by the Clerk).',
+      'Used when a participant is removed from a session (e.g. ejected by a moderator).',
   })
   @ApiParam({ name: 'contextId', description: 'The domain entity ID used when provisioning the room.' })
   @ApiResponse({ status: 201, description: 'Session invalidated. Returns `{ success: true }`.' })
@@ -282,7 +301,7 @@ export class RoomsController {
     summary: 'Mute all participants in the AudioBridge',
     description:
       'Applies a server-side mute to every participant in the AudioBridge room. ' +
-      'Used for emergency mute, voting lockdown, and sitting adjournment.',
+      'Used for emergency mute, moderator lockdown, and room adjournment.',
   })
   @ApiParam({ name: 'contextId', description: 'The domain entity ID used when provisioning the room.' })
   @ApiResponse({ status: 201, description: 'All participants muted. Returns `{ success: true }`.' })
@@ -305,7 +324,7 @@ export class RoomsController {
   })
   @ApiParam({ name: 'contextId', description: 'The domain entity ID used when provisioning the room.' })
   @ApiQuery({ name: 'appId', description: 'Consumer application identifier.' })
-  @ApiQuery({ name: 'contextType', description: 'Domain entity type (e.g. "sitting").' })
+  @ApiQuery({ name: 'contextType', description: 'Domain entity type (e.g. "meeting").' })
   @ApiResponse({
     status: 200,
     description: 'Array of participants: `[{ id: number, display: string, muted: boolean }]`.',

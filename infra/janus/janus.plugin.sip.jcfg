@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Janus SIP Plugin Configuration — Communications Service (self-hosted)
+# ─────────────────────────────────────────────────────────────────────────────
+# This plugin lets Janus participate in SIP sessions. In this deployment,
+# Janus's SIP plugin acts as a single bridge identity (e.g. janus@comms.local)
+# registered with the Kamailio sidecar. Inbound calls from free softphones
+# (Linphone, Zoiper, MicroSIP, …) arrive at Kamailio, get routed to Janus,
+# and the plugin accepts them and bridges the audio into the appropriate
+# AudioBridge room as a plain-RTP participant.
+#
+# IMPORTANT: this is NOT a PSTN gateway. No real phone numbers are involved
+# and no SIP trunk provider is configured. All SIP signalling stays inside
+# the private Docker network (or your internal LAN if you expose port 5060).
+#
+# See docs/sip/ for full documentation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+general: {
+	# Local IP the plugin advertises in SDP. "auto" lets Janus pick the
+	# container's primary interface. Override with a concrete value if
+	# running behind NAT or on a host with multiple interfaces.
+	local_ip = "auto"
+
+	# Keep-alive interval (seconds) for SIP REGISTER refreshes. Kamailio's
+	# default registration expiry is 300s, so 120 gives us 2x headroom.
+	keepalive_interval = 120
+
+	# Default REGISTER expiry (seconds) requested from the registrar.
+	register_ttl = 300
+
+	# Enable NAT-friendly SDP handling. Safe for both containerised and
+	# hosted deployments — set to false only if you know your network has
+	# no NAT between clients and Janus.
+	behind_nat = true
+
+	# Dedicated RTP port range for SIP plugin media. Kept isolated from
+	# AudioBridge/VideoRoom (10000-10200) to avoid any possibility of
+	# collision between WebRTC and SIP media flows.
+	rtp_port_range = "20000-20999"
+
+	# Log level for this plugin only (0=none, 7=verbose). Default 4 gives
+	# us INFO-level SIP event logs without flooding the console.
+	sip_log_level = 4
+}

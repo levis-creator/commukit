@@ -28,6 +28,30 @@ model CommunicationUser {
   /// until the first successful rotation.
   matrixPassword String?
 
+  /// Participant classification.
+  ///   DOMAIN     — a real end-user from a consumer app (default).
+  ///   SIP_BRIDGE — the Janus SIP plugin's own registered identity
+  ///                (e.g. janus@comms.local). Reserved; never issued to
+  ///                consumer users.
+  ///   HARDWARE   — embedded room equipment (in-room mics, codec systems);
+  ///                reserved for the legacy `|HARDWARE` participant
+  ///                convention enforced by `guardHardwareHandle`.
+  participantType String  @default("DOMAIN")
+
+  /// SIP username (e.g. `comms_<16chars>`). Null when SIP is disabled or
+  /// when this user hasn't been authorized for an audio room yet. Mirrors
+  /// the lazy-provisioning pattern used by `matrixUserId`.
+  sipUsername String? @unique
+
+  /// Randomly-generated SIP password used by softphones for DIGEST auth.
+  /// Stored to allow returning credentials to the consumer on subsequent
+  /// authorize calls without rotating. Never logged.
+  sipPassword String?
+
+  /// Last display name successfully pushed to Kamailio's location table.
+  /// Used to skip no-op writes on subsequent authorize calls.
+  sipDisplayName String?
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -35,6 +59,7 @@ model CommunicationUser {
 
   @@unique([appId, domainUserId])
   @@index([appId])
+  @@index([participantType])
   @@map("communication_users")
 }
 

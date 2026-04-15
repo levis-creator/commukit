@@ -4,7 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export class RoomLifecycleDto {
   @ApiProperty({
     description: 'Unique identifier for the consumer application.',
-    example: 'parliament',
+    example: 'my-app',
   })
   @IsString()
   @IsNotEmpty()
@@ -12,7 +12,7 @@ export class RoomLifecycleDto {
 
   @ApiProperty({
     description: 'Domain entity type scoping this room.',
-    example: 'sitting',
+    example: 'meeting',
   })
   @IsString()
   @IsNotEmpty()

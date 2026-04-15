@@ -1,159 +1,133 @@
 # Communications Service
 
-A reusable NestJS microservice that provides room-based **chat**, **audio**, and **video** by abstracting [Matrix Synapse](https://matrix.org/docs/projects/server/synapse) (chat) and [Janus Gateway](https://janus.conf.meetecho.com/) (WebRTC audio/video) behind a small, app-owned REST contract.
+A reusable, app-agnostic NestJS microservice for room-based communications. It gives any backend a small HTTP contract for provisioning rooms, authorizing users, and moderating sessions while delegating transport details to Matrix, Janus, and optional SIP infrastructure.
 
-Any backend — written in any language, on any framework — can provision rooms, authorize users, and receive session credentials without embedding Matrix or Janus-specific logic. The service is multi-tenant: many consumer apps can share a single deployment, isolated by `appId`.
+The service is multi-tenant. Many consumer apps can share one deployment and stay isolated by `appId`.
 
----
+This repository lives inside the broader `vps-ke-parliament` workspace, but the communications-service is not Parliament-specific. Parliament is just one consumer of the service. The same API and deployment can be reused by other apps that need embedded chat, audio, video, or SIP-backed room access.
 
-## What This Server Is For
+## What It Does
 
-Real-time communication is hard to build well. Spinning up Matrix, Janus, coturn, and the glue between them — and then maintaining all of that as your app evolves — is months of work that has very little to do with your actual product.
+This service exists to hide the operational glue around embedded communications:
 
-This service collapses that work into a handful of HTTP calls:
+- Matrix Synapse for chat
+- Janus Gateway for audio and video
+- coturn for NAT traversal
+- Kamailio plus the Janus SIP plugin for free softphone access
 
-- **Provision a room** for any domain context you care about (a meeting, a ticket, a classroom, a 1:1 call, a support thread).
-- **Authorize a user** for that room and receive scoped credentials they can hand to a chat / WebRTC client.
-- **Moderate** participants (mute, kick, mute-all, invalidate-session) with a server-enforced audit trail.
-- **Close the room** when the context ends; cached tokens are invalidated and resources are released.
+Your backend does not talk to Matrix or Janus directly. It talks to this service using an internal JWT. Your clients then connect directly to the returned chat and media backends using scoped credentials.
 
-Your backend never touches Matrix or Janus directly. Your client talks to those services with the credentials this server hands out. **The communications-service is not a media relay** — once the client has the credentials, media flows directly between the client and Matrix/Janus.
+Important boundary: the communications-service is not a media relay. Once credentials are issued, media flows directly between the client and the transport backend.
 
-### Who Should Use It
+Another important boundary: this service is a shared platform component, not an app feature module tied to Parliament. Consumer apps bring their own domain concepts, authorization rules, and UI; they only use this service for communications provisioning and session orchestration.
 
-- Any team that wants chat, voice, or video in a product **without owning the Matrix/Janus operational burden**.
-- Teams running multiple apps that should share one comms backbone.
-- Products with real-time domain events (meetings, calls, sessions, classes, tickets) that need server-enforced moderation and an audit trail.
+## When It Fits
 
-### When You Should NOT Use It
+Use it when you want:
 
-- You need **end-to-end encrypted** media. SFU/mixer architectures terminate encryption at the server. For true E2EE, look at mesh P2P or SFrame-based stacks.
-- You need **massive broadcast scale** (10k+ concurrent listeners). Pair this service with a separate HLS/DASH re-streamer or a purpose-built platform.
-- You need **PSTN telephony** (real phone numbers). Use a SIP trunk gateway or Twilio/etc. — out of scope here.
-- You need **a chat platform users discover and federate with**. Matrix supports federation, but this service deliberately uses private rooms scoped to your app. It's an embedded primitive, not a standalone Matrix homeserver.
+- Private app-scoped chat rooms
+- Room-based voice or video sessions
+- Server-enforced audio moderation
+- A reusable comms backbone shared across multiple apps
+- A small REST API instead of embedding Matrix and Janus logic in every consumer
+- One communications service that can support Parliament, another internal product, or a completely separate app with no Parliament-specific assumptions
 
----
+Avoid it when you need:
 
-## What You Need to Know Before Using It
+- End-to-end encrypted media
+- PSTN or carrier telephony
+- Very large broadcast streaming
+- A public or federated chat product
 
-A short orientation so the rest of the docs make sense.
+## Mental Model
 
-### Mental Model
-
-```
-┌────────────┐  internal JWT   ┌──────────────────────┐
-│  Your app  │ ──────────────▶ │ communications-service │
-│  backend   │                 │  (rooms / lifecycle)   │
-└─────┬──────┘                 └──────────┬───────────┘
-      │ scoped creds                      │ admin APIs
-      ▼                                   ▼
-┌────────────┐                  ┌──────────────────────┐
-│ Your client │ ──── direct ───▶│ Matrix Synapse       │
-│ (web/mobile)│ ──── direct ───▶│ Janus + coturn       │
-└────────────┘                  └──────────────────────┘
+```text
+Your backend --internal JWT--> communications-service --admin APIs--> Matrix / Janus
+Your client  <--scoped creds-- communications-service
+Your client  --direct connect-----------------------> Matrix / Janus / TURN
 ```
 
-Three rules to internalize:
+Three rules matter most:
 
-1. **The unit of provisioning is a room.** Rooms are keyed by `(appId, contextType, contextId)`. There is no concept of "a call" or "a chat" at the API level — both are just rooms with different `mode` settings.
-2. **Comms hands out credentials, not media.** Your backend authenticates with comms via internal JWT; comms returns Matrix tokens and Janus coordinates; your clients then connect to Matrix and Janus directly. Comms is never on the media path.
-3. **Mode is immutable.** You pick `mode` at provision time and can't change it. Pick a new context (new `contextId`) if you need a different mode later.
+1. The unit of provisioning is a room, keyed by `(appId, contextType, contextId)`.
+2. Room mode is immutable after provisioning.
+3. Your backend owns domain authorization; this service trusts the caller.
 
-### Things Your Backend Owns (Comms Does Not)
+Because rooms are keyed by app-level identifiers rather than Parliament-specific entities, the same service works for meetings, classrooms, customer support sessions, hearings, direct messages, or any other domain a consumer app defines.
 
-- **Domain authorization.** "Is this user actually allowed in this meeting?" Comms trusts whatever `domainUserId` your JWT carries. You decide who's allowed.
-- **Signalling for calls.** Ringing a callee, declining, busy, missed-call notifications — comms doesn't do any of that. Your existing real-time channel (push, websocket, chat event) handles it.
-- **Moderator privileges.** Comms enforces moderation commands but doesn't decide *who* is a moderator. Your backend gates the moderation endpoints on whatever role logic you already have.
-- **Persistence of messages and recordings.** By default chat lives in Synapse, audio/video are transient. If you need a local archive, see [docs/chat/04-persistence.md](docs/chat/04-persistence.md) and [docs/audio/06-security.md#recording](docs/audio/06-security.md).
+## What Your Backend Still Owns
 
-### Prerequisites
+This service helps with transport and session lifecycle, but your app still owns:
 
-Before integrating, you should have:
+- Domain-level authorization
+- Call signalling such as ringing, decline, busy, and missed-call flows
+- Moderator policy and role decisions
+- Long-term archives, analytics, and recordings beyond what the transport stores
 
-- A **stable `appId`** for your application (a short identifier; scopes Matrix rooms and event filtering)
-- A way to **sign JWTs** with `aud: "communications-service"` from your backend (any language with a JWT library)
-- A **shared `INTERNAL_SERVICE_SECRET`** between your backend and comms-service (configured in both `.env` files)
-- For media: a **TURN server** reachable from your clients in production (development can use the bundled coturn)
-- For chat: nothing extra — comms-service brings its own Matrix Synapse
+## Core Capabilities
 
-### Guarantees and Non-Guarantees
+- Room provisioning and lifecycle
+- Unified session response for chat, audio, video, and optional SIP
+- Per-capability graceful degradation
+- Audio moderation: mute, unmute, mute-room, kick
+- Video participant kick
+- Session invalidation to block re-authorization
+- Audit logging for state-changing operations
+- RabbitMQ events for room provisioned, activated, and closed
 
-| Guaranteed | NOT guaranteed |
-|---|---|
-| Idempotent room provisioning | RabbitMQ event delivery (best-effort, fire-and-forget) |
-| Server-enforced audio mute (AudioBridge mode) | Server-enforced video mute (SFU forwards unchanged) |
-| Immutable audit log of all state changes | E2EE between participants — Janus terminates encryption |
-| Graceful degradation when Matrix/Janus is down | Recovery of in-flight calls when Janus restarts |
-| Scoped per-user Matrix tokens, invalidated on close | Recovery of cached credentials after `closeRoom` |
+## Capability Map
 
-### Cost of an Integration
-
-Realistically, a backend developer comfortable with HTTP + JWT can wire this into an existing app in **a day or two** for chat-only or audio-only, **two to four days** for full chat + audio + video including a moderation UI. Most of the work is on the client (Matrix SDK or Janus SDK setup), not the backend.
-
----
-
-## Documentation
-
-Capability-specific developer docs live in [`docs/`](docs/). Read the README in each folder first, then drill in:
-
-| Capability | Index | Covers |
+| Capability | Backend | Notes |
 |---|---|---|
-| **Chat** | [docs/chat/](docs/chat/README.md) | Matrix Synapse, room provisioning, persistence options |
-| **Audio** | [docs/audio/](docs/audio/README.md) | Janus AudioBridge mixer, voice calls, server-enforced mute |
-| **Video** | [docs/video/](docs/video/README.md) | Janus VideoRoom SFU, group video, 1-on-1 calls, moderation |
-| **Onboarding** | [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) | Original 8-step end-to-end onboarding (chat + audio + video together) |
+| Chat | Matrix Synapse | Private app-scoped rooms |
+| Audio | Janus AudioBridge | Mixer model, server-enforced mute |
+| Video | Janus VideoRoom | SFU model |
+| SIP | Kamailio + Janus SIP plugin | Free softphone access, no PSTN |
 
-Each capability folder has the same shape: architecture → API flow → step-by-step integration → specialized topics → moderation → security → troubleshooting.
+## Documentation Map
 
----
+Start with the capability README that matches your use case:
 
-## Features
-
-- **Room provisioning** — create rooms scoped by `appId` + `contextType` + `contextId`
-- **Unified session** — one API call returns chat, audio, and video credentials with per-capability status
-- **Multi-app support** — isolated by `appId`, no code changes needed to onboard new consumers
-- **Graceful degradation** — each capability (chat, audioBridge, videoRoom) reports its own availability
-- **ICE servers included** — STUN/TURN config returned in session response, clients don't need local config
-- **Chat-only rooms** — `CHAT` mode provisions Matrix only (no Janus), for DMs and lightweight chat
-- **Participant control** — server-side mute, unmute, kick, and room-wide mute via Janus
-- **Audit trail** — all room lifecycle events are logged
-- **RabbitMQ events** — publishes `communications.room.provisioned/activated/closed` on a configurable exchange
+| Area | Path | Covers |
+|---|---|---|
+| Chat | [`docs/chat/README.md`](docs/chat/README.md) | Matrix rooms, provisioning, persistence options |
+| Audio | [`docs/audio/README.md`](docs/audio/README.md) | AudioBridge architecture, voice flows, moderation |
+| Video | [`docs/video/README.md`](docs/video/README.md) | VideoRoom flows, 1:1 and group video |
+| SIP | [`docs/sip/README.md`](docs/sip/README.md) | Softphone credentials, registrar flow, troubleshooting |
+| Providers | [`docs/PROVIDERS.md`](docs/PROVIDERS.md) | Pluggable provider model and current support limits |
+| Onboarding | [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md) | End-to-end integration overview |
 
 ## Quick Start
 
-### Standalone (with Docker)
+### Standalone Docker Deployment
 
-This brings up the service with all dependencies (PostgreSQL, Redis, RabbitMQ, Matrix Synapse, Janus, coturn):
+From the service directory:
 
 ```bash
 cd vps-ke-communications-service
-cp .env.example .env     # or use the provided .env
+cp .env.example .env
 docker compose up -d
-```
-
-Wait for all containers to be healthy, then run database migrations:
-
-```bash
 docker compose exec communications-service npx prisma migrate deploy
 ```
 
-The service is now running at `http://localhost:3014`. Verify with:
+Verify:
 
 ```bash
 curl http://localhost:3014/health
-# {"status":"ok","matrix":"connected","janus":"connected"}
 ```
 
-### Inside an existing monorepo
+Typical healthy response on the default Janus path:
 
-If running alongside other services that already provide Postgres / Redis / RabbitMQ, point comms at the shared infrastructure via `.env` and skip the standalone Docker stack. From a monorepo root that has the necessary npm scripts wired up:
-
-```bash
-npm run docker:dev:up    # Start shared Postgres, Redis, RabbitMQ
-npm run dev:comms        # Start communications-service with hot-reload
+```json
+{
+  "status": "ok",
+  "matrix": "connected",
+  "janus": "connected",
+  "sip": "disabled"
+}
 ```
 
-### Local development (no Docker)
+### Local Development
 
 ```bash
 npm install
@@ -162,57 +136,149 @@ npx prisma migrate dev
 npm run start:dev
 ```
 
-Requires PostgreSQL, Redis, and RabbitMQ running locally. Matrix and Janus are optional — the service degrades gracefully if they're unavailable.
+For local non-Docker development, PostgreSQL, Redis, and RabbitMQ must already be running. Matrix and Janus are optional; capability status degrades cleanly when they are unavailable.
 
-## Architecture
+## Deployment Shape
 
+### Always-On Core
+
+These services are required in every deployment:
+
+| Service | Role |
+|---|---|
+| `communications-service` | HTTP API and orchestration |
+| `postgres` | Prisma-backed persistence |
+| `redis` | Cooldowns, cache, transient coordination |
+| `rabbitmq` | Room lifecycle event publishing |
+
+With only the core running, the API still boots. Capability fields simply come back as unavailable with a reason.
+
+### Optional Capability Profiles
+
+The Docker Compose stack gates optional infrastructure behind profiles:
+
+| Profile | Containers | Purpose | Main flag |
+|---|---|---|---|
+| `chat` | `synapse` | Matrix chat | `MATRIX_ENABLED=true` |
+| `media` | `janus-gateway`, `coturn` | Janus audio and video | `JANUS_ENABLED=true` |
+| `sip` | `kamailio` | SIP softphones into AudioBridge | `SIP_ENABLED=true` |
+| `livekit` | `livekit` | Reserved infrastructure slot only | `MEDIA_PROVIDER=livekit` |
+
+Examples:
+
+```bash
+# Chat only
+COMPOSE_PROFILES=chat docker compose up -d
+
+# Audio and video via Janus only
+COMPOSE_PROFILES=media docker compose up -d
+
+# Default shape from .env.example
+COMPOSE_PROFILES=chat,media docker compose up -d
+
+# Everything supported today, including SIP
+COMPOSE_PROFILES=chat,media,sip docker compose up -d
+
+# LiveKit infrastructure scaffold only
+COMPOSE_PROFILES=chat,livekit docker compose up -d
 ```
-┌──────────────────┐     internal JWT      ┌──────────────────────────┐
-│  Your Backend    │ ───────────────────►  │  communications-service  │
-│  (any app)       │                       │                          │
-│                  │ ◄── session ────────  │  Matrix ←→ chat          │
-└──────────────────┘                       │  Janus  ←→ audio/video   │
-                                           │  coturn ←→ NAT traversal │
-         ┌─────────────┐                   └──────────────────────────┘
-         │ Your Client  │                            ▲
-         │ (Flutter/Web) │ ── direct with tokens ───┘
-         └─────────────┘
-```
 
-**Your backend** provisions rooms and authorizes users via internal JWT-authenticated REST calls. The service returns scoped tokens. **Your clients** talk directly to Matrix (chat) and Janus (video/audio) using those tokens — the communications-service is not a relay.
+## Current Support Matrix
 
-## API Endpoints
+The codebase is provider-oriented, but the practical support story today is:
 
-All endpoints require an internal JWT (`Authorization: Bearer <token>`) with `aud: "communications-service"`.
+| Media provider | SIP | Status |
+|---|---|---|
+| `janus` | off | Supported |
+| `janus` | on | Supported |
+| `livekit` | off | Infrastructure scaffold only; no shipped NestJS media adapter yet |
+| `livekit` | on | Not supported; SIP bridge refuses boot with `incompatible-media` |
+
+Why the last row fails: the only shipped SIP bridge is Janus-specific and can only route calls into a Janus AudioBridge. It cannot bridge into a LiveKit media plane.
+
+## Configuration
+
+See [`.env.example`](.env.example) for the full template. The most important groups are:
+
+| Group | Variables |
+|---|---|
+| Service | `NODE_ENV`, `COMMS_SERVICE_PORT` |
+| Capability toggles | `MATRIX_ENABLED`, `JANUS_ENABLED`, `SIP_ENABLED` |
+| Provider selection | `MEDIA_PROVIDER`, `CHAT_PROVIDER` |
+| Database | `DATABASE_URL` |
+| Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
+| Messaging | `RABBITMQ_URL`, `RMQ_EXCHANGE`, `RMQ_QUEUE` |
+| Auth | `INTERNAL_SERVICE_SECRET` |
+| Matrix | `MATRIX_SERVER_URL`, `MATRIX_PUBLIC_SERVER_URL`, `MATRIX_SERVER_NAME`, `MATRIX_BOT_*` |
+| Janus | `JANUS_HTTP_URL`, `JANUS_WS_URL`, `JANUS_PUBLIC_WS_URL`, `JANUS_ICE_SERVERS` |
+| TURN | `TURN_USERNAME`, `TURN_PASSWORD`, `TURN_REALM`, `TURN_EXTERNAL_IP` |
+| SIP | `SIP_DOMAIN`, `SIP_REGISTRAR_HOST`, `SIP_BRIDGE_USERNAME`, `SIP_BRIDGE_PASSWORD` |
+| LiveKit scaffold | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` |
+
+## Health Semantics
+
+`GET /health` is deliberately capability-aware. It tells you whether each optional backend is loaded and working.
+
+Possible values:
+
+- `connected`: capability loaded and reachable
+- `unreachable`: capability loaded but backend unavailable
+- `disabled`: capability intentionally not loaded
+- `registered`: SIP bridge is live and registered
+- `unregistered`: SIP enabled but registrar path not ready yet
+- `incompatible-media`: SIP enabled, but current media provider cannot support the loaded SIP bridge
+
+This endpoint is the fastest way to confirm whether you have a runtime problem or just a disabled feature.
+
+## API Overview
+
+All internal endpoints require:
+
+- `Authorization: Bearer <token>`
+- JWT audience `aud: "communications-service"`
 
 ### Room Lifecycle
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/internal/v1/rooms/provision` | Create a room for a domain context (idempotent) |
-| `POST` | `/internal/v1/rooms/:contextId/activate` | Mark room ACTIVE |
-| `POST` | `/internal/v1/rooms/:contextId/close` | Mark room CLOSED |
-| `POST` | `/internal/v1/rooms/:contextId/authorize-user` | Get session credentials for a user |
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/internal/v1/rooms/provision` | Idempotently create a room for a domain context |
+| `POST` | `/internal/v1/rooms/:contextId/activate` | Mark a room active |
+| `POST` | `/internal/v1/rooms/:contextId/close` | Close a room |
+| `POST` | `/internal/v1/rooms/:contextId/authorize-user` | Return user session credentials |
 
-### Participant Control
+### Moderation and Control
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/internal/v1/rooms/:contextId/participants` | List AudioBridge participants with mute state |
-| `POST` | `/internal/v1/rooms/:contextId/mute` | Mute a single participant |
-| `POST` | `/internal/v1/rooms/:contextId/unmute` | Unmute a single participant |
-| `POST` | `/internal/v1/rooms/:contextId/mute-room` | Mute all participants |
-| `POST` | `/internal/v1/rooms/:contextId/kick-audio` | Remove a participant from AudioBridge |
-| `POST` | `/internal/v1/rooms/:contextId/kick-video` | Remove a participant from VideoRoom |
-| `POST` | `/internal/v1/rooms/:contextId/invalidate-session` | Prevent a user from re-authorizing |
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/internal/v1/rooms/:contextId/participants` | List audio participants |
+| `POST` | `/internal/v1/rooms/:contextId/mute` | Mute one audio participant |
+| `POST` | `/internal/v1/rooms/:contextId/unmute` | Unmute one audio participant |
+| `POST` | `/internal/v1/rooms/:contextId/mute-room` | Mute the whole audio room |
+| `POST` | `/internal/v1/rooms/:contextId/kick-audio` | Kick from AudioBridge |
+| `POST` | `/internal/v1/rooms/:contextId/kick-video` | Kick from VideoRoom |
+| `POST` | `/internal/v1/rooms/:contextId/invalidate-session` | Prevent future re-authorization |
+
+### User SIP Endpoint
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/internal/v1/users/sip-credentials` | Fetch or mint softphone credentials for a user |
 
 ### Health
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check (no auth required) |
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Unauthenticated health check |
 
-### Session Response
+## Session Response Shape
+
+The authorization endpoint returns a unified object. Each capability may be:
+
+- `null` because the room mode does not include it
+- `available`
+- `unavailable` with a reason
+
+Example:
 
 ```json
 {
@@ -223,153 +289,156 @@ All endpoints require an internal JWT (`Authorization: Bearer <token>`) with `au
     "roomId": "!abc:comms.local",
     "accessToken": "syt_...",
     "serverUrl": "http://matrix:8020",
-    "serverName": "comms.local"
+    "serverName": "comms.local",
+    "credentials": {
+      "provider": "matrix",
+      "roomId": "!abc:comms.local",
+      "accessToken": "syt_...",
+      "serverUrl": "http://matrix:8020",
+      "serverName": "comms.local"
+    }
   },
   "audioBridge": {
     "status": "available",
     "roomId": 123456,
-    "wsUrl": "ws://janus:8188/janus"
+    "wsUrl": "ws://janus:8188",
+    "credentials": {
+      "provider": "janus",
+      "roomId": 123456,
+      "wsUrl": "ws://janus:8188"
+    }
   },
   "videoRoom": {
     "status": "available",
     "roomId": 789012,
-    "wsUrl": "ws://janus:8188/janus",
+    "wsUrl": "ws://janus:8188",
     "iceServers": [
-      { "urls": ["stun:stun.l.google.com:19302"] },
-      { "urls": ["turn:turn:3478"], "username": "...", "credential": "..." }
-    ]
+      { "urls": ["stun:stun.l.google.com:19302"] }
+    ],
+    "credentials": {
+      "provider": "janus",
+      "roomId": 789012,
+      "wsUrl": "ws://janus:8188",
+      "iceServers": [
+        { "urls": ["stun:stun.l.google.com:19302"] }
+      ]
+    }
+  },
+  "sip": {
+    "status": "available",
+    "username": "comms_user_1",
+    "password": "secret",
+    "registrar": "sip:comms.local:5060;transport=udp",
+    "domain": "comms.local",
+    "transport": "udp",
+    "roomUri": "sip:room-session-123@comms.local"
   },
   "modeImmutable": true
 }
 ```
 
-For `CHAT` mode rooms, `audioBridge` and `videoRoom` are `null`.
+### API Version Header
 
-### Room Modes
+The service supports a migration-friendly response shape:
 
-| Mode | Chat (Matrix) | AudioBridge (Janus) | VideoRoom (Janus) | Typical use |
-|------|:---:|:---:|:---:|---|
-| `IN_PERSON` | Yes | Yes | No | Physical meeting room with audio mixing |
-| `HYBRID` | Yes | Yes | Yes | Mixed in-person + remote participants |
+- v1 clients can keep reading legacy flat fields such as `roomId` and `wsUrl`
+- v2 clients send `X-Comms-API-Version: 2` and receive the provider-tagged `credentials` shape without the legacy fields
+
+## Room Modes
+
+| Mode | Chat | Audio | Video | Typical use |
+|---|:---:|:---:|:---:|---|
+| `IN_PERSON` | Yes | Yes | No | Physical room with mixed audio |
+| `HYBRID` | Yes | Yes | Yes | In-room plus remote attendees |
 | `REMOTE` | Yes | No | Yes | Fully remote video session |
-| `CHAT` | Yes | No | No | 1-to-1 DMs, text-only channels |
+| `CHAT` | Yes | No | No | Direct messages or text-only channels |
 
-> Room mode is **immutable** — provision a new room if the mode needs to change.
+Room mode is immutable. If your domain flow changes from text-only to video later, provision a new room under a new context.
 
-## Example Usage Patterns
+## Example Domain Mapping
 
-Common ways consumer apps map their domain concepts to rooms:
+| Use case | Suggested `contextType` | Suggested `contextId` |
+|---|---|---|
+| Scheduled meeting | `meeting` | meeting UUID |
+| Direct call | `direct_call` | stable pair key such as `call_<idA>_<idB>` |
+| Direct message | `direct_message` | stable pair key such as `dm_<idA>_<idB>` |
+| Team channel | `channel` | channel UUID |
+| Support thread | `ticket` | ticket ID |
 
-| Use case | Suggested `contextType` | Suggested `contextId` convention | Mode |
-|----------|-------------------------|----------------------------------|------|
-| Scheduled meeting / session | `meeting` | meeting UUID | `IN_PERSON`, `HYBRID`, or `REMOTE` |
-| 1-to-1 audio call | `direct_call` | `call_<userA-id>_<userB-id>` (IDs sorted) | `IN_PERSON` |
-| 1-to-1 video call | `direct_call` | `call_<userA-id>_<userB-id>` (IDs sorted) | `HYBRID` |
-| 1-to-1 direct message | `direct_message` | `dm_<userA-id>_<userB-id>` (IDs sorted) | `CHAT` |
-| Group / team channel | `channel` | channel UUID | `CHAT` |
+For 1:1 contexts, sort the user IDs before building the key so provisioning stays idempotent regardless of who initiated the interaction.
 
-Sorting user IDs for 1-to-1 contexts ensures the room is idempotent regardless of which user initiates it. `contextType` is a free-form string — use whatever makes sense in your domain.
+These are only examples. A Parliament hearing, a school class, a telehealth session, or a customer support room can all map into the same API as long as the consumer app provides stable `appId`, `contextType`, and `contextId` values.
 
 ## Data Model
 
+Main tables:
+
 | Table | Purpose |
-|-------|---------|
-| `communication_users` | Maps domain users to Matrix identities |
-| `communication_rooms` | Room metadata, transport IDs, lifecycle status, and mode |
-| `communication_memberships` | User-room authorization records (with optional `leftAt` for invalidation) |
-| `communication_audit_logs` | Immutable event trail |
+|---|---|
+| `communication_users` | Maps domain users to transport identities and SIP credentials |
+| `communication_rooms` | Room metadata, lifecycle state, transport room IDs |
+| `communication_memberships` | User-room authorization and invalidation state |
+| `communication_audit_logs` | Immutable audit trail |
 
-## Configuration
+## Architecture Notes
 
-See [.env.example](.env.example) for all configuration options. Key groups:
-
-| Group | Variables | Purpose |
-|-------|-----------|---------|
-| Service | `COMMS_SERVICE_PORT` | HTTP port (default: 3014) |
-| Database | `DATABASE_URL` | PostgreSQL connection |
-| Auth | `INTERNAL_SERVICE_SECRET` | Shared secret for internal JWT validation |
-| RabbitMQ | `RABBITMQ_URL`, `RMQ_EXCHANGE`, `RMQ_QUEUE` | Message broker and exchange/queue names |
-| Matrix | `MATRIX_SERVER_URL`, `MATRIX_PUBLIC_SERVER_URL`, `MATRIX_SERVER_NAME`, `MATRIX_BOT_*` | Synapse connection, domain, and bot credentials |
-| Janus | `JANUS_HTTP_URL`, `JANUS_PUBLIC_WS_URL` | Gateway connection |
-| ICE | `JANUS_ICE_SERVERS`, `JANUS_TURN_*` | STUN/TURN for WebRTC clients |
-| TURN | `TURN_USERNAME`, `TURN_PASSWORD`, `TURN_EXTERNAL_IP` | coturn relay (standalone mode) |
-
-All infrastructure naming is generic (`comms.local`, `comms-bot`, `comms_events_fanout`). When deploying inside an existing system, override `MATRIX_SERVER_NAME`, `MATRIX_BOT_USERNAME`, `RMQ_EXCHANGE`, and `RMQ_QUEUE` to match your environment.
-
-## Docker Compose Services
-
-When running standalone, `docker-compose.yml` starts 7 containers:
-
-| Container | Image | Port |
-|-----------|-------|------|
-| `comms-service` | Built from Dockerfile | 3014 |
-| `comms-postgres` | postgres:16-alpine | 5432 |
-| `comms-redis` | redis:7-alpine | 6379 |
-| `comms-rabbitmq` | rabbitmq:3-management-alpine | 5672 / 15672 |
-| `comms-synapse` | matrixdotorg/synapse | 8020 |
-| `comms-janus` | canyan/janus-gateway | 8088 / 8188 |
-| `comms-coturn` | coturn/coturn | 3478 |
+- Chat is private and app-scoped, not a general Matrix product surface.
+- Audio uses Janus AudioBridge, so mute is enforced server-side.
+- Video uses Janus VideoRoom, so video mute is not enforced the same way audio mute is.
+- SIP is opt-in and private to your deployment. It is not PSTN.
+- Provider abstraction exists in the codebase, but only Janus and Matrix are actually shipped providers today.
 
 ## Testing
 
+Useful scripts:
+
 ```bash
-npm test          # Run all unit tests
-npm run test:cov  # With coverage
+npm test
+npm run test:cov
+npm run lint
+npm run build
 ```
 
-56 tests across 4 test suites:
-- `rooms.service.spec.ts` — room provisioning, lifecycle, authorization, degradation
-- `rooms.controller.spec.ts` — endpoint delegation, internal JWT validation
-- `matrix.service.spec.ts` — room creation, user provisioning, invite dedup, messages
-- `janus.service.spec.ts` — AudioBridge/VideoRoom creation, ICE config, health checks
+The repository includes tests for core room flows, Matrix integration, Janus integration, and SIP bridge behavior.
 
-## Integration Guide
+## Project Layout
 
-For capability-focused step-by-step guides (with Express.js and Janus client examples), start at the relevant docs folder:
-
-- [docs/chat/03-integration.md](docs/chat/03-integration.md)
-- [docs/audio/03-integration.md](docs/audio/03-integration.md)
-- [docs/video/03-integration.md](docs/video/03-integration.md)
-
-For the original end-to-end onboarding doc covering all three together, see [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md).
-
-## Directory Structure
-
-```
+```text
 vps-ke-communications-service/
-├── src/
-│   ├── main.ts                  # HTTP + RabbitMQ bootstrap
-│   ├── app.module.ts            # Root module
-│   ├── auth/                    # Internal JWT guard
-│   ├── database/                # Prisma client
-│   ├── redis/                   # Redis cache
-│   ├── matrix/                  # Matrix Synapse integration
-│   ├── janus/                   # Janus Gateway integration
-│   ├── rooms/                   # Core room management (controller, service, DTOs)
-│   ├── messaging/               # RabbitMQ publisher
-│   └── health/                  # Health check endpoint
-├── prisma/
-│   └── schema.prisma            # Database schema
-├── infra/                       # Standalone infrastructure configs
-│   ├── synapse/                 # Matrix homeserver config
-│   ├── janus/                   # Janus gateway + transport configs
-│   └── coturn/                  # TURN relay config
-├── docs/
-│   ├── INTEGRATION_GUIDE.md     # Original end-to-end onboarding
-│   ├── chat/                    # Matrix-backed chat docs (8 files)
-│   ├── audio/                   # AudioBridge / voice-call docs (8 files)
-│   └── video/                   # VideoRoom / 1:1 + group video docs (8 files)
-├── docker-compose.yml           # Standalone deployment (all dependencies)
-├── Dockerfile                   # Production image
-├── .env                         # Local dev configuration
-├── .env.example                 # Configuration template
-└── package.json
+  src/
+    app.module.ts
+    main.ts
+    auth/
+    common/
+    database/
+    health/
+    janus/
+    matrix/
+    messaging/
+    providers/
+    redis/
+    rooms/
+    sip/
+    users/
+  prisma/
+  infra/
+    coturn/
+    janus/
+    kamailio/
+    livekit/
+    synapse/
+  docs/
+  docker-compose.yml
+  .env.example
 ```
 
-## Author
+## Practical Caveats
 
-**Levis Nyingi** — [@levis-creator](https://github.com/levis-creator)
+- LiveKit support is not fully implemented yet, even though the repo contains scaffolding for it.
+- SIP plus LiveKit is not supported in the current codebase.
+- Graceful degradation is intentional. A booting server with unavailable capabilities is not necessarily broken.
+- Closing a room invalidates access, but transport-specific in-flight behavior still depends on backend realities.
 
 ## License
 
-UNLICENSED — Private project.
+UNLICENSED - Private project.

@@ -3,9 +3,10 @@ import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 
 /**
- * Phase 6 cross-cutting observability — re-uses the parliament backend's
- * `X-Request-Id` when present so a single request is traceable across
- * comms + parliament + matrix + janus.
+ * Cross-cutting observability — honours any inbound `X-Request-Id` the
+ * consumer app sends so a single request can be traced end-to-end across
+ * the consumer backend, comms-service, and downstream media/chat providers.
+ * Generates a UUID when the header is absent.
  */
 @Injectable()
 export class RequestIdMiddleware implements NestMiddleware {

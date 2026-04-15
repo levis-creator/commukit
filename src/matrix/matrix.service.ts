@@ -1,9 +1,15 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import { RedisService } from '../redis/redis.service';
+import type {
+  ChatProvider,
+  ChatUserToken,
+} from '../providers/chat-provider.interface';
 
 /**
- * MatrixService — owns all Matrix Synapse interactions for the communications layer.
+ * MatrixService — Matrix Synapse implementation of the `ChatProvider` contract.
+ *
+ * Owns all Matrix Synapse interactions for the communications layer.
  *
  * Responsibilities:
  *   - Bot account lifecycle (register / login on startup, refresh on 401)
@@ -23,7 +29,8 @@ import { RedisService } from '../redis/redis.service';
  *   - All Matrix HTTP calls have a hard timeout to prevent request stalls.
  */
 @Injectable()
-export class MatrixService implements OnModuleInit {
+export class MatrixService implements ChatProvider, OnModuleInit {
+  readonly id = 'matrix' as const;
   private readonly logger = new Logger(MatrixService.name);
 
   private static readonly HTTP_TIMEOUT_MS = 10_000;

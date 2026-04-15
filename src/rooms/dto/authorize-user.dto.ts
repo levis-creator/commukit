@@ -11,7 +11,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class AuthorizeUserDto {
   @ApiProperty({
     description: 'Unique identifier for the consumer application.',
-    example: 'parliament',
+    example: 'my-app',
     maxLength: 64,
   })
   @IsString()
@@ -21,7 +21,7 @@ export class AuthorizeUserDto {
 
   @ApiProperty({
     description: 'Domain entity type scoping this room.',
-    example: 'sitting',
+    example: 'meeting',
     maxLength: 64,
   })
   @IsString()
@@ -30,8 +30,8 @@ export class AuthorizeUserDto {
   contextType: string;
 
   @ApiProperty({
-    description: 'The domain-side user ID (e.g. the parliament member UUID). Used to map to a Matrix identity.',
-    example: 'member-uuid-5678',
+    description: 'The domain-side user ID used to map to a chat identity (e.g. your app\'s user UUID).',
+    example: 'user-uuid-5678',
     maxLength: 128,
   })
   @IsString()
@@ -41,13 +41,13 @@ export class AuthorizeUserDto {
 
   @ApiProperty({
     description:
-      'Display name shown in Matrix chat and used for Janus participant matching. ' +
-      'Bounded to prevent display-name injection into Matrix or audit logs.',
-    example: 'Hon. Jane Doe',
+      'Display name shown in chat and used for audio/video participant matching. ' +
+      'Bounded to prevent display-name injection into the chat provider or audit logs.',
+    example: 'Jane Doe',
     maxLength: 100,
   })
   /// Bounded so an attacker with a valid internal JWT can't push a huge
-  /// display name into Matrix / our DB / audit log metadata.
+  /// display name into the chat provider / our DB / audit log metadata.
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
@@ -56,7 +56,7 @@ export class AuthorizeUserDto {
   @ApiPropertyOptional({
     description:
       'Optional roles for this session. Include "MODERATOR" to grant moderator-level ' +
-      'permissions in the room (e.g. Clerk or Speaker accounts).',
+      'permissions in the room.',
     type: [String],
     example: ['MODERATOR'],
     maxItems: 32,

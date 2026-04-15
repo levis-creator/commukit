@@ -1,0 +1,37 @@
+# LiveKit single-node dev config.
+#
+# This file reserves the infra layout for a future LiveKit MediaProvider
+# adapter. The container is dormant unless COMPOSE_PROFILES=livekit is set.
+# Production deployments should:
+#   - Generate a strong API key/secret pair (`livekit-server generate-keys`).
+#   - Set LIVEKIT_API_KEY / LIVEKIT_API_SECRET in `.env`.
+#   - Review and tune the RTC port range to match your network.
+#   - Enable Redis for multi-node setups (`redis:` block below).
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  # Must match the docker-compose port range for the `livekit` profile.
+  udp_port: 7882
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+
+# Keys are injected via LIVEKIT_KEYS env var in docker-compose.yml.
+# keys:
+#   devkey: change-me-livekit-secret
+
+logging:
+  level: info
+  json: false
+
+# Single-node setup. For clustered deployments, enable Redis:
+# redis:
+#   address: redis:6379
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 200

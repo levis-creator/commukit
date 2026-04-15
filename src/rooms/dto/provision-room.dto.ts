@@ -28,8 +28,8 @@ export type SittingMode = RoomMode;
 
 export class ProvisionRoomDto {
   @ApiProperty({
-    description: 'Unique identifier for the consumer application (e.g. "parliament").',
-    example: 'parliament',
+    description: 'Unique identifier for the consumer application (e.g. "meetings-app", "my-saas").',
+    example: 'my-app',
     maxLength: 64,
   })
   @IsString()
@@ -38,8 +38,8 @@ export class ProvisionRoomDto {
   appId: string;
 
   @ApiProperty({
-    description: 'Domain entity type scoping this room (e.g. "sitting", "committee").',
-    example: 'sitting',
+    description: 'Domain entity type scoping this room (e.g. "meeting", "room", "session").',
+    example: 'meeting',
     maxLength: 64,
   })
   @IsString()
@@ -48,8 +48,8 @@ export class ProvisionRoomDto {
   contextType: string;
 
   @ApiProperty({
-    description: 'Unique identifier of the domain entity (e.g. the sitting UUID).',
-    example: 'sitting-uuid-1234',
+    description: 'Unique identifier of the domain entity (e.g. the meeting UUID).',
+    example: 'meeting-uuid-1234',
     maxLength: 128,
   })
   @IsString()
@@ -58,8 +58,8 @@ export class ProvisionRoomDto {
   contextId: string;
 
   @ApiProperty({
-    description: 'Human-readable title used as the Matrix room name.',
-    example: '14th Parliament — Plenary Sitting #42',
+    description: 'Human-readable title used as the chat room name.',
+    example: 'Weekly Product Sync',
     maxLength: 200,
   })
   @IsString()

@@ -2,17 +2,18 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { RoomsService } from './rooms.service';
 import { PrismaService } from '../database/prisma.service';
-import { MatrixService } from '../matrix/matrix.service';
-import { JanusService } from '../janus/janus.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { RedisService } from '../redis/redis.service';
+import { CHAT_PROVIDER, MEDIA_PROVIDER } from '../providers/tokens';
+import type { ChatProvider } from '../providers/chat-provider.interface';
+import type { MediaProvider } from '../providers/media-provider.interface';
 import { RoomMode } from './dto/provision-room.dto';
 
 describe('RoomsService', () => {
   let service: RoomsService;
   let prisma: jest.Mocked<PrismaService>;
-  let matrix: jest.Mocked<MatrixService>;
-  let janus: jest.Mocked<JanusService>;
+  let matrix: jest.Mocked<ChatProvider>;
+  let janus: jest.Mocked<MediaProvider>;
   let messaging: jest.Mocked<MessagingService>;
 
   const mockRoom = {
@@ -58,8 +59,9 @@ describe('RoomsService', () => {
           },
         },
         {
-          provide: MatrixService,
+          provide: CHAT_PROVIDER,
           useValue: {
+            id: 'matrix',
             ensureRoom: jest.fn(),
             ensureUserToken: jest.fn(),
             inviteAndJoin: jest.fn(),
@@ -81,11 +83,19 @@ describe('RoomsService', () => {
           },
         },
         {
-          provide: JanusService,
+          provide: MEDIA_PROVIDER,
           useValue: {
+            id: 'janus',
             ensureAudioBridgeRoom: jest.fn(),
             ensureVideoRoom: jest.fn(),
             destroyVideoRoom: jest.fn(),
+            listParticipants: jest.fn(),
+            listVideoParticipants: jest.fn(),
+            muteParticipant: jest.fn(),
+            unmuteParticipant: jest.fn(),
+            muteRoom: jest.fn(),
+            kickAudioParticipant: jest.fn(),
+            kickVideoParticipant: jest.fn(),
             isAvailable: jest.fn(),
             buildIceServers: jest.fn(),
             wsUrl: 'ws://janus:8188',
@@ -102,8 +112,8 @@ describe('RoomsService', () => {
 
     service = module.get(RoomsService);
     prisma = module.get(PrismaService);
-    matrix = module.get(MatrixService);
-    janus = module.get(JanusService);
+    matrix = module.get(CHAT_PROVIDER);
+    janus = module.get(MEDIA_PROVIDER);
     messaging = module.get(MessagingService);
   });
 
@@ -319,11 +329,22 @@ describe('RoomsService', () => {
     beforeEach(() => {
       (prisma.communicationRoom.findUnique as jest.Mock).mockResolvedValue(activeRoom);
       (prisma.communicationUser.findUnique as jest.Mock).mockResolvedValue(commUser);
+      (prisma.communicationMembership.findUnique as jest.Mock).mockResolvedValue(null);
       (prisma.communicationMembership.upsert as jest.Mock).mockResolvedValue({});
       (janus.isAvailable as jest.Mock).mockReturnValue(true);
       (janus.buildIceServers as jest.Mock).mockReturnValue([
         { urls: ['stun:stun.l.google.com:19302'] },
       ]);
+      // `authorizeUser` re-calls `ensureAudioBridgeRoom` / `ensureVideoRoom`
+      // with the persisted room refs to reconcile live state. Default each
+      // mock to echo whatever the caller passed so sessions report
+      // `available`. Individual tests override when they need a specific ID.
+      (janus.ensureAudioBridgeRoom as jest.Mock).mockImplementation(
+        async (_ctx: string, knownRoomId?: number | null) => knownRoomId ?? 0,
+      );
+      (janus.ensureVideoRoom as jest.Mock).mockImplementation(
+        async (_ctx: string, knownRoomId?: number | null) => knownRoomId ?? 0,
+      );
     });
 
     it('should return full session with available capabilities', async () => {

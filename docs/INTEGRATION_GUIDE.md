@@ -111,6 +111,7 @@ When a user in your app needs to join the room, your backend must first verify t
 POST /internal/v1/rooms/:contextId/authorize-user
 Authorization: Bearer <internal-jwt>
 Content-Type: application/json
+X-Comms-API-Version: 2
 
 {
   "appId": "your-app-id",
@@ -121,37 +122,68 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
+Set the `X-Comms-API-Version: 2` header to receive the **v2 response shape**
+described below, in which each capability exposes a provider-tagged
+`credentials` discriminated-union instead of the legacy flat fields. Omit
+the header to receive the v1 shape (deprecated but still supported).
+
+**v2 response:**
 ```json
 {
   "roomId": "<comms-room-uuid>",
   "status": "ACTIVE",
   "chat": {
     "status": "available",
-    "roomId": "!xyz:your-domain.local",
-    "accessToken": "syt_...",
-    "serverUrl": "http://matrix-host:8020",
-    "serverName": "your-domain.local"
+    "credentials": {
+      "provider": "matrix",
+      "roomId": "!xyz:your-domain.local",
+      "accessToken": "syt_...",
+      "serverUrl": "http://matrix-host:8020",
+      "serverName": "your-domain.local"
+    }
   },
   "audioBridge": null,
   "videoRoom": {
     "status": "available",
-    "roomId": 789012,
-    "wsUrl": "ws://janus-host:8188/janus",
-    "iceServers": [
-      { "urls": ["stun:stun.l.google.com:19302"] },
-      { "urls": ["turn:turn-host:3478"], "username": "...", "credential": "..." }
-    ]
+    "credentials": {
+      "provider": "janus",
+      "roomId": 789012,
+      "wsUrl": "ws://janus-host:8188/janus",
+      "iceServers": [
+        { "urls": ["stun:stun.l.google.com:19302"] },
+        { "urls": ["turn:turn-host:3478"], "username": "...", "credential": "..." }
+      ]
+    }
   },
   "modeImmutable": true
 }
 ```
 
-Each capability has its own `status` field. If Matrix is down, `chat.status` will be `"unavailable"` with a `reason`, but `videoRoom` may still be `"available"`.
+Clients should **switch on `credentials.provider`** to pick the correct
+transport. Today only `matrix` (chat) and `janus` (audio/video) are
+emitted. When a LiveKit adapter ships, the audio/video credentials may
+carry `provider: "livekit"` with a different field set (`room`, `url`,
+`token`) — see [`PROVIDERS.md`](./PROVIDERS.md).
+
+Each capability has its own `status` field. If the chat provider is down,
+`chat.status` will be `"unavailable"` with a `reason`, but `videoRoom` may
+still be `"available"`.
 
 For `CHAT` mode rooms, `audioBridge` and `videoRoom` are always `null`.
 
-A **10-second per-user cooldown** suppresses duplicate Matrix side-effects (invite, room join) on rapid re-connection. Subsequent calls within the window return the same credentials immediately.
+A **10-second per-user cooldown** suppresses duplicate Matrix side-effects
+(invite, room join) on rapid re-connection. Subsequent calls within the
+window return the same credentials immediately.
+
+### Legacy v1 response (deprecated)
+
+Without the version header, the response still contains the flat fields
+`chat.roomId`, `chat.accessToken`, `chat.serverUrl`, `chat.serverName`,
+`audioBridge.roomId`, `audioBridge.wsUrl`, `videoRoom.roomId`,
+`videoRoom.wsUrl`, `videoRoom.iceServers`. These are **deprecated** and
+will be removed in a future release once all known consumers have
+migrated. New integrations should send `X-Comms-API-Version: 2` from day
+one.
 
 ---
 

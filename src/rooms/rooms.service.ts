@@ -2,15 +2,25 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { MatrixService } from '../matrix/matrix.service';
-import { JanusService } from '../janus/janus.service';
+import { SipService } from '../sip/sip.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { RedisService } from '../redis/redis.service';
+import {
+  CHAT_PROVIDER,
+  MEDIA_PROVIDER,
+  SIP_PROVIDER,
+} from '../providers/tokens';
+import type { ChatProvider } from '../providers/chat-provider.interface';
+import type { MediaProvider } from '../providers/media-provider.interface';
+import type { SipProvider } from '../providers/sip-provider.interface';
 import { ProvisionRoomDto, RoomMode } from './dto/provision-room.dto';
 import { AuthorizeUserDto } from './dto/authorize-user.dto';
 
@@ -22,34 +32,121 @@ export interface CapabilityStatus {
   reason?: string;
 }
 
-/** Matrix chat session credentials returned by `authorizeUser`. */
-export interface ChatSession extends CapabilityStatus {
-  /** Matrix room ID (e.g. `!abc123:matrix.server`). */
-  roomId?: string;
-  /** User-scoped Matrix access token for direct CS-API calls. */
-  accessToken?: string;
-  /** Public Matrix server URL for client connections. */
-  serverUrl?: string;
-  /** Matrix server name (home server domain). */
-  serverName?: string;
+// ── Provider-discriminated credentials (Phase 3 shape) ───────────────────────
+//
+// Each capability exposes a provider-tagged `credentials` object alongside
+// the legacy flat fields. Version-1 clients (no `X-Comms-API-Version` header)
+// still receive the flat fields; version-2 clients (set via the controller's
+// header sniff + `stripLegacySessionFields`) receive `credentials` only.
+// Phase 5 deletes the legacy flat fields for good.
+
+export interface MatrixChatCredentials {
+  provider: 'matrix';
+  roomId: string;
+  accessToken: string;
+  serverUrl: string;
+  serverName: string;
 }
 
-/** Janus AudioBridge session info returned by `authorizeUser`. */
-export interface AudioBridgeSession extends CapabilityStatus {
-  /** Janus AudioBridge room ID. */
-  roomId?: number;
-  /** WebSocket URL for the Janus Gateway. */
-  wsUrl?: string;
+export type ChatCredentials = MatrixChatCredentials;
+
+export interface JanusAudioCredentials {
+  provider: 'janus';
+  roomId: number;
+  wsUrl: string;
 }
 
-/** Janus VideoRoom session info returned by `authorizeUser`. */
-export interface VideoRoomSession extends CapabilityStatus {
-  /** Janus VideoRoom ID. */
-  roomId?: number;
-  /** WebSocket URL for the Janus Gateway. */
-  wsUrl?: string;
-  /** ICE server configuration for WebRTC peer connection setup. */
+export interface LivekitAudioCredentials {
+  provider: 'livekit';
+  room: string;
+  url: string;
+  token: string;
+}
+
+export type AudioCredentials = JanusAudioCredentials | LivekitAudioCredentials;
+
+export interface JanusVideoCredentials {
+  provider: 'janus';
+  roomId: number;
+  wsUrl: string;
+  iceServers: Array<{ urls: string[]; username?: string; credential?: string }>;
+}
+
+export interface LivekitVideoCredentials {
+  provider: 'livekit';
+  room: string;
+  url: string;
+  token: string;
   iceServers?: Array<{ urls: string[]; username?: string; credential?: string }>;
+}
+
+export type VideoCredentials = JanusVideoCredentials | LivekitVideoCredentials;
+
+/**
+ * Chat session returned by `authorizeUser`.
+ *
+ * **Legacy flat fields** (`roomId`, `accessToken`, `serverUrl`, `serverName`)
+ * are populated for v1 clients. New integrations should consume `credentials`
+ * and send the `X-Comms-API-Version: 2` header to suppress the legacy fields.
+ */
+export interface ChatSession extends CapabilityStatus {
+  /** @deprecated use `credentials.roomId` */
+  roomId?: string;
+  /** @deprecated use `credentials.accessToken` */
+  accessToken?: string;
+  /** @deprecated use `credentials.serverUrl` */
+  serverUrl?: string;
+  /** @deprecated use `credentials.serverName` */
+  serverName?: string;
+  /** Provider-tagged chat credentials (preferred). */
+  credentials?: ChatCredentials;
+}
+
+/** Audio session returned by `authorizeUser`. */
+export interface AudioBridgeSession extends CapabilityStatus {
+  /** @deprecated use `credentials.roomId` (provider=janus) */
+  roomId?: number;
+  /** @deprecated use `credentials.wsUrl` (provider=janus) */
+  wsUrl?: string;
+  /** Provider-tagged audio credentials (preferred). */
+  credentials?: AudioCredentials;
+}
+
+/** Video session returned by `authorizeUser`. */
+export interface VideoRoomSession extends CapabilityStatus {
+  /** @deprecated use `credentials.roomId` (provider=janus) */
+  roomId?: number;
+  /** @deprecated use `credentials.wsUrl` (provider=janus) */
+  wsUrl?: string;
+  /** @deprecated use `credentials.iceServers` */
+  iceServers?: Array<{ urls: string[]; username?: string; credential?: string }>;
+  /** Provider-tagged video credentials (preferred). */
+  credentials?: VideoCredentials;
+}
+
+/**
+ * SIP softphone session info returned by `authorizeUser`.
+ *
+ * Returned only when `SIP_ENABLED=true` AND the room mode includes an
+ * AudioBridge (`IN_PERSON` or `HYBRID`). Consumers hand these values to
+ * the user so they can configure a free SIP softphone (Linphone, Zoiper,
+ * MicroSIP, Jitsi, Bria) and dial the room URI to join the AudioBridge.
+ *
+ * Note: this is internal SIP federation — there is no PSTN connectivity.
+ */
+export interface SipSession extends CapabilityStatus {
+  /** SIP username (DIGEST identifier). */
+  username?: string;
+  /** SIP password (DIGEST credential). Treat as a secret. */
+  password?: string;
+  /** Full registrar URI, e.g. `sip:comms.local:5060;transport=udp`. */
+  registrar?: string;
+  /** SIP domain advertised in URIs, e.g. `comms.local`. */
+  domain?: string;
+  /** Transport — usually `udp`; tcp/tls available where configured. */
+  transport?: 'udp' | 'tcp' | 'tls';
+  /** Room SIP URI to dial, e.g. `sip:room-<contextId>@comms.local`. */
+  roomUri?: string;
 }
 
 /**
@@ -68,8 +165,34 @@ export interface CommunicationsSessionResponse {
   audioBridge: AudioBridgeSession | null;
   /** Janus VideoRoom credentials, or null for IN_PERSON-mode rooms. */
   videoRoom: VideoRoomSession | null;
+  /** SIP softphone credentials, or null for rooms without an AudioBridge. */
+  sip: SipSession | null;
   /** Always true — room mode cannot be changed after provisioning. */
   modeImmutable: boolean;
+}
+
+/**
+ * Removes the deprecated flat credential fields (`roomId`, `wsUrl`, etc.)
+ * from a session response, leaving only the `credentials` discriminated
+ * union. Called from the controller when the client sends
+ * `X-Comms-API-Version: 2` or higher.
+ *
+ * Mutates the passed object and returns it for fluent use. Safe to call on
+ * a response that has already been stripped.
+ */
+export function stripLegacySessionFields(
+  session: CommunicationsSessionResponse,
+): CommunicationsSessionResponse {
+  const stripKeys = <T extends object>(obj: T | null, keys: readonly string[]) => {
+    if (!obj) return;
+    for (const key of keys) {
+      delete (obj as Record<string, unknown>)[key];
+    }
+  };
+  stripKeys(session.chat, ['roomId', 'accessToken', 'serverUrl', 'serverName']);
+  stripKeys(session.audioBridge, ['roomId', 'wsUrl']);
+  stripKeys(session.videoRoom, ['roomId', 'wsUrl', 'iceServers']);
+  return session;
 }
 
 /**
@@ -84,7 +207,7 @@ export interface CommunicationsSessionResponse {
  *
  * All public methods are called exclusively from [RoomsController] after the
  * [InternalJwtGuard] has verified the service-to-service JWT. Domain-level
- * authorization (e.g. "is this member allowed in this sitting?") is the
+ * authorization (e.g. "is this user allowed in this room?") is the
  * responsibility of the calling service — this layer trusts the JWT.
  */
 @Injectable()
@@ -96,11 +219,58 @@ export class RoomsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly matrix: MatrixService,
-    private readonly janus: JanusService,
     private readonly messaging: MessagingService,
     private readonly redis: RedisService,
+    // Capability providers are injected via DI tokens so alternative
+    // implementations (LiveKit, etc.) can be bound in `app.module.ts`
+    // without touching this service. `@Optional()` because each provider
+    // is gated on its enable flag at module-import time.
+    @Optional() @Inject(CHAT_PROVIDER) private readonly chat?: ChatProvider,
+    @Optional() @Inject(MEDIA_PROVIDER) private readonly media?: MediaProvider,
+    @Optional() private readonly sip?: SipService,
+    @Optional() @Inject(SIP_PROVIDER) private readonly sipProvider?: SipProvider,
   ) {}
+
+  // ── Capability availability helpers ────────────────────────────────────────
+  //
+  // Each helper returns either `null` when the capability is fully usable, or
+  // a human-readable reason string when it isn't. The reason distinguishes
+  // "disabled" (module not loaded) from "unreachable" (module loaded but the
+  // external service is down) so debugging is straightforward.
+
+  private chatUnavailableReason(): string | null {
+    if (!this.chat) return 'Chat provider disabled';
+    if (!this.chat.isAvailable()) return 'Chat provider unreachable';
+    return null;
+  }
+
+  private mediaUnavailableReason(): string | null {
+    if (!this.media) return 'Media provider disabled';
+    if (!this.media.isAvailable()) return 'Media provider unreachable';
+    return null;
+  }
+
+  private sipUnavailableReason(): string | null {
+    if (!this.sip) return 'SIP disabled';
+    // When SipBridgeService detected an incompatible media provider at
+    // startup, `bridgeStatus()` returns 'incompatible-media' and the
+    // bridge has refused to REGISTER. Issuing SIP credentials in that
+    // state would be actively misleading — a softphone that registers
+    // against Kamailio would land in a Janus AudioBridge that no
+    // WebRTC client ever joins. Surface the misconfiguration instead.
+    if (
+      this.sipProvider &&
+      this.sipProvider.bridgeStatus() === 'incompatible-media'
+    ) {
+      return (
+        `SIP incompatible with active media provider: ` +
+        `the "${this.sipProvider.id}" SIP bridge cannot route calls ` +
+        `into the configured media backend. Fix MEDIA_PROVIDER or ` +
+        `disable SIP_ENABLED. See /health for details.`
+      );
+    }
+    return null;
+  }
 
   // ── Provision ──────────────────────────────────────────────────────────────
 
@@ -127,22 +297,25 @@ export class RoomsService {
     }
 
     // Provision Matrix room (scoped by appId to avoid cross-app alias collisions).
-    const matrixRoomId = await this.matrix.ensureRoom(
-      dto.appId,
-      dto.contextId,
-      dto.title,
-    );
+    // Skipped entirely when Matrix is disabled — `matrixRoomId` stays null and
+    // the room provisions chat-less. Subsequent authorizeUser calls report
+    // `chat: { status: 'unavailable', reason: 'Matrix disabled' }`.
+    const matrixRoomId = this.chat
+      ? await this.chat.ensureRoom(dto.appId, dto.contextId, dto.title)
+      : null;
 
     // Provision Janus rooms based on the room's transport mode.
     // CHAT mode skips Janus entirely — Matrix room only.
+    // When Janus is disabled, both ids stay null and the corresponding
+    // capabilities report unavailable on subsequent authorizeUser calls.
     let janusAudioRoomId: number | null = null;
     let janusVideoRoomId: number | null = null;
 
-    if (dto.mode === RoomMode.IN_PERSON || dto.mode === RoomMode.HYBRID) {
-      janusAudioRoomId = await this.janus.ensureAudioBridgeRoom(dto.contextId);
+    if (this.media && (dto.mode === RoomMode.IN_PERSON || dto.mode === RoomMode.HYBRID)) {
+      janusAudioRoomId = await this.media.ensureAudioBridgeRoom(dto.contextId);
     }
-    if (dto.mode === RoomMode.HYBRID || dto.mode === RoomMode.REMOTE) {
-      janusVideoRoomId = await this.janus.ensureVideoRoom(dto.contextId);
+    if (this.media && (dto.mode === RoomMode.HYBRID || dto.mode === RoomMode.REMOTE)) {
+      janusVideoRoomId = await this.media.ensureVideoRoom(dto.contextId);
     }
 
     const room = await this.prisma.communicationRoom.create({
@@ -173,8 +346,8 @@ export class RoomsService {
       contextType: dto.contextType,
       contextId: dto.contextId,
       mode: dto.mode,
-      // Legacy alias for any consumer still reading the old field name.
-      // TODO: remove once all consumers migrate to `mode`.
+      // Legacy alias emitted for backwards compatibility with the first
+      // consumer app. Safe to drop once no subscriber still reads it.
       sittingMode: dto.mode,
     });
 
@@ -226,9 +399,9 @@ export class RoomsService {
       );
     }
 
-    // Best-effort cleanup of Janus VideoRoom
-    if (room.janusVideoRoomId) {
-      await this.janus.destroyVideoRoom(contextId, room.janusVideoRoomId);
+    // Best-effort cleanup of Janus VideoRoom (skipped when Janus disabled).
+    if (this.media && room.janusVideoRoomId) {
+      await this.media.destroyVideoRoom(contextId, room.janusVideoRoomId);
     }
 
     // Invalidate all active Matrix sessions for this room so members can't
@@ -289,12 +462,15 @@ export class RoomsService {
       },
     });
 
-    // Provision (or look up) the Matrix user.
-    const matrixResult = await this.matrix.ensureUserToken(
-      dto.domainUserId,
-      dto.displayName,
-      commUser?.matrixPassword ?? null,
-    );
+    // Provision (or look up) the Matrix user. Skipped when Matrix is disabled —
+    // `matrixResult` stays null and the chat capability later reports unavailable.
+    const matrixResult = this.chat
+      ? await this.chat.ensureUserToken(
+          dto.domainUserId,
+          dto.displayName,
+          commUser?.matrixPassword ?? null,
+        )
+      : null;
 
     if (!commUser) {
       commUser = await this.prisma.communicationUser.create({
@@ -334,11 +510,12 @@ export class RoomsService {
     // matrixDisplayName already matches.
     if (
       !skipMatrixSideEffects &&
+      this.chat &&
       matrixResult &&
       dto.displayName &&
       commUser.matrixDisplayName !== dto.displayName
     ) {
-      const ok = await this.matrix.updateDisplayName(
+      const ok = await this.chat.updateDisplayName(
         matrixResult.accessToken,
         matrixResult.matrixUserId,
         dto.displayName,
@@ -348,6 +525,46 @@ export class RoomsService {
           where: { id: commUser.id },
           data: { matrixDisplayName: dto.displayName },
         });
+      }
+    }
+
+    // Provision (or reuse) SIP credentials when SIP is enabled, the bridge
+    // is compatible with the active media provider, and the room mode
+    // includes an AudioBridge. Mirrors the Matrix credential lifecycle:
+    // first call mints a password, subsequent calls return the cached one.
+    //
+    // When the SIP bridge reported `incompatible-media` at startup, skip
+    // credential provisioning entirely — the `sipUnavailableReason()`
+    // helper below will surface the misconfiguration to the caller, and
+    // we don't want to persist SIP usernames/passwords for a code path
+    // that will never successfully bridge a call.
+    let sipResult: { username: string; password: string | null } | null = null;
+    const roomNeedsAudio =
+      room.mode === RoomMode.IN_PERSON || room.mode === RoomMode.HYBRID;
+    const sipBridgeUsable =
+      !this.sipProvider ||
+      this.sipProvider.bridgeStatus() !== 'incompatible-media';
+    if (this.sip && sipBridgeUsable && roomNeedsAudio) {
+      sipResult = await this.sip.ensureUserCredentials(
+        dto.appId,
+        dto.domainUserId,
+        dto.displayName,
+        commUser.sipPassword ?? null,
+        commUser.sipUsername ?? null,
+      );
+      if (sipResult) {
+        const sipUpdates: Record<string, any> = {};
+        if (!commUser.sipUsername) sipUpdates.sipUsername = sipResult.username;
+        if (sipResult.password) sipUpdates.sipPassword = sipResult.password;
+        if (commUser.sipDisplayName !== dto.displayName) {
+          sipUpdates.sipDisplayName = dto.displayName;
+        }
+        if (Object.keys(sipUpdates).length > 0) {
+          commUser = await this.prisma.communicationUser.update({
+            where: { id: commUser.id },
+            data: sipUpdates,
+          });
+        }
       }
     }
 
@@ -372,12 +589,13 @@ export class RoomsService {
       update: {},
     });
 
-    // Build chat session
+    // Build chat session — null when the room mode has no chat at all,
+    // otherwise either available credentials or an unavailable+reason hint.
     let chat: ChatSession | null = null;
     if (room.matrixRoomId) {
-      if (matrixResult) {
+      if (this.chat && matrixResult) {
         if (!skipMatrixSideEffects) {
-          await this.matrix.inviteAndJoin(
+          await this.chat.inviteAndJoin(
             room.matrixRoomId,
             matrixResult.matrixUserId,
             matrixResult.accessToken,
@@ -385,27 +603,52 @@ export class RoomsService {
         }
         chat = {
           status: 'available',
+          // Legacy flat fields (stripped for v2 clients).
           roomId: room.matrixRoomId,
           accessToken: matrixResult.accessToken,
-          serverUrl: this.matrix.publicServerUrl,
-          serverName: this.matrix.serverName,
+          serverUrl: this.chat.publicServerUrl,
+          serverName: this.chat.serverName,
+          // Phase 3 discriminated-union shape.
+          credentials: {
+            provider: 'matrix',
+            roomId: room.matrixRoomId,
+            accessToken: matrixResult.accessToken,
+            serverUrl: this.chat.publicServerUrl,
+            serverName: this.chat.serverName,
+          },
         };
       } else {
-        chat = { status: 'unavailable', reason: 'Matrix service unreachable' };
+        chat = {
+          status: 'unavailable',
+          reason: this.chatUnavailableReason() ?? 'Matrix service unreachable',
+        };
       }
+    } else if (this.chatUnavailableReason()) {
+      // Room was provisioned without a Matrix room (because Matrix was
+      // disabled at provision time). Surface the disabled state so the
+      // client knows chat is intentionally off.
+      chat = { status: 'unavailable', reason: this.chatUnavailableReason()! };
     }
 
     // Build audioBridge session (CHAT mode has no audio/video)
     let audioBridge: AudioBridgeSession | null = null;
     const mode = room.mode;
     if (mode === 'IN_PERSON' || mode === 'HYBRID') {
-      if (this.janus.isAvailable()) {
-        const liveAudioRoomId = await this.janus.ensureAudioBridgeRoom(room.contextId, room.janusAudioRoomId);
+      const janusReason = this.mediaUnavailableReason();
+      if (this.media && !janusReason) {
+        const liveAudioRoomId = await this.media.ensureAudioBridgeRoom(room.contextId, room.janusAudioRoomId);
         if (liveAudioRoomId) {
           audioBridge = {
             status: 'available',
+            // Legacy flat fields (stripped for v2 clients).
             roomId: liveAudioRoomId,
-            wsUrl: this.janus.wsUrl,
+            wsUrl: this.media.wsUrl,
+            // Phase 3 discriminated-union shape.
+            credentials: {
+              provider: 'janus',
+              roomId: liveAudioRoomId,
+              wsUrl: this.media.wsUrl,
+            },
           };
         } else {
           audioBridge = { status: 'unavailable', reason: 'AudioBridge room could not be provisioned' };
@@ -413,7 +656,7 @@ export class RoomsService {
       } else {
         audioBridge = {
           status: 'unavailable',
-          reason: room.janusAudioRoomId ? 'Janus service unreachable' : 'AudioBridge room not provisioned',
+          reason: janusReason ?? (room.janusAudioRoomId ? 'Janus service unreachable' : 'AudioBridge room not provisioned'),
         };
       }
     }
@@ -421,14 +664,24 @@ export class RoomsService {
     // Build videoRoom session
     let videoRoom: VideoRoomSession | null = null;
     if (mode === 'HYBRID' || mode === 'REMOTE') {
-      if (this.janus.isAvailable()) {
-        const liveVideoRoomId = await this.janus.ensureVideoRoom(room.contextId, room.janusVideoRoomId);
+      const janusReason = this.mediaUnavailableReason();
+      if (this.media && !janusReason) {
+        const liveVideoRoomId = await this.media.ensureVideoRoom(room.contextId, room.janusVideoRoomId);
         if (liveVideoRoomId) {
+          const iceServers = this.media.buildIceServers();
           videoRoom = {
             status: 'available',
+            // Legacy flat fields (stripped for v2 clients).
             roomId: liveVideoRoomId,
-            wsUrl: this.janus.wsUrl,
-            iceServers: this.janus.buildIceServers(),
+            wsUrl: this.media.wsUrl,
+            iceServers,
+            // Phase 3 discriminated-union shape.
+            credentials: {
+              provider: 'janus',
+              roomId: liveVideoRoomId,
+              wsUrl: this.media.wsUrl,
+              iceServers,
+            },
           };
         } else {
           videoRoom = { status: 'unavailable', reason: 'VideoRoom could not be provisioned' };
@@ -436,7 +689,33 @@ export class RoomsService {
       } else {
         videoRoom = {
           status: 'unavailable',
-          reason: room.janusVideoRoomId ? 'Janus service unreachable' : 'VideoRoom not provisioned',
+          reason: janusReason ?? (room.janusVideoRoomId ? 'Janus service unreachable' : 'VideoRoom not provisioned'),
+        };
+      }
+    }
+
+    // Build SIP session — only present for rooms that have an AudioBridge
+    // (IN_PERSON or HYBRID). REMOTE and CHAT rooms get `sip: null`.
+    let sip: SipSession | null = null;
+    if (roomNeedsAudio) {
+      const sipReason = this.sipUnavailableReason();
+      if (this.sip && !sipReason && sipResult) {
+        // Pull the persisted credentials. `sipResult.password` is only set
+        // when a fresh password was minted on this call; otherwise we read
+        // the cached value from the user row we updated above.
+        const password = sipResult.password ?? commUser.sipPassword ?? null;
+        if (password) {
+          sip = this.sip.buildSessionDescriptor(
+            { username: sipResult.username, password },
+            room.contextId,
+          );
+        } else {
+          sip = { status: 'unavailable', reason: 'SIP credential provisioning failed' };
+        }
+      } else {
+        sip = {
+          status: 'unavailable',
+          reason: sipReason ?? 'SIP credential provisioning failed',
         };
       }
     }
@@ -446,6 +725,7 @@ export class RoomsService {
       chatAvailable: chat?.status === 'available',
       audioBridgeAvailable: audioBridge?.status === 'available',
       videoRoomAvailable: videoRoom?.status === 'available',
+      sipAvailable: sip?.status === 'available',
     });
 
     return {
@@ -454,6 +734,7 @@ export class RoomsService {
       chat,
       audioBridge,
       videoRoom,
+      sip,
       modeImmutable: true,
     };
   }
@@ -470,9 +751,9 @@ export class RoomsService {
     contextType: string,
     domainUserId: string,
   ): Promise<{ success: boolean }> {
-    const room = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(room.janusAudioRoomId!, domainUserId);
-    await this.janus.muteParticipant(room.janusAudioRoomId!, participantId);
+    const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
+    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
+    await janus.muteParticipant(room.janusAudioRoomId!, participantId);
     await this.audit(room.id, 'MIC_MUTED', domainUserId, { participantId });
     return { success: true };
   }
@@ -487,24 +768,24 @@ export class RoomsService {
     contextType: string,
     domainUserId: string,
   ): Promise<{ success: boolean }> {
-    const room = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(room.janusAudioRoomId!, domainUserId);
-    await this.janus.unmuteParticipant(room.janusAudioRoomId!, participantId);
+    const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
+    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
+    await janus.unmuteParticipant(room.janusAudioRoomId!, participantId);
     await this.audit(room.id, 'MIC_UNMUTED', domainUserId, { participantId });
     return { success: true };
   }
 
   /**
    * Mute ALL participants in the AudioBridge room.
-   * Used for emergency mute, voting lockdown, and sitting adjournment.
+   * Used for emergency mute, moderator lockdown, and room adjournment.
    */
   async muteRoom(
     contextId: string,
     appId: string,
     contextType: string,
   ): Promise<{ success: boolean }> {
-    const room = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    await this.janus.muteRoom(room.janusAudioRoomId!);
+    const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
+    await janus.muteRoom(room.janusAudioRoomId!);
     await this.audit(room.id, 'ROOM_MUTED', null, { reason: 'server_initiated' });
     return { success: true };
   }
@@ -517,8 +798,8 @@ export class RoomsService {
     appId: string,
     contextType: string,
   ): Promise<Array<{ id: number; display: string; muted: boolean }>> {
-    const room = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    return this.janus.listParticipants(room.janusAudioRoomId!);
+    const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
+    return janus.listParticipants(room.janusAudioRoomId!);
   }
 
   // ── Kick ───────────────────────────────────────────────────────────────────
@@ -533,9 +814,9 @@ export class RoomsService {
     contextType: string,
     domainUserId: string,
   ): Promise<{ success: boolean }> {
-    const room = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(room.janusAudioRoomId!, domainUserId);
-    await this.janus.kickAudioParticipant(room.janusAudioRoomId!, participantId);
+    const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
+    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
+    await janus.kickAudioParticipant(room.janusAudioRoomId!, participantId);
     await this.audit(room.id, 'PARTICIPANT_KICKED_AUDIO', domainUserId, { participantId });
     return { success: true };
   }
@@ -550,9 +831,9 @@ export class RoomsService {
     contextType: string,
     domainUserId: string,
   ): Promise<{ success: boolean }> {
-    const room = await this.findActiveRoomWithVideo(appId, contextType, contextId);
-    const participantId = await this.resolveVideoParticipantId(room.janusVideoRoomId!, domainUserId);
-    await this.janus.kickVideoParticipant(room.janusVideoRoomId!, participantId);
+    const { room, janus } = await this.findActiveRoomWithVideo(appId, contextType, contextId);
+    const participantId = await this.resolveVideoParticipantId(janus, room.janusVideoRoomId!, domainUserId);
+    await janus.kickVideoParticipant(room.janusVideoRoomId!, participantId);
     await this.audit(room.id, 'PARTICIPANT_KICKED_VIDEO', domainUserId, { participantId });
     return { success: true };
   }
@@ -598,9 +879,16 @@ export class RoomsService {
 
   /**
    * Find an ACTIVE room that has a provisioned AudioBridge.
-   * Shared by all mic control methods.
+   * Shared by all mic control methods. Returns the room **and a non-null
+   * JanusService reference** so call sites don't need to re-check
+   * availability or use non-null assertions. Throws a descriptive 503 /
+   * 400 when any precondition fails.
    */
   private async findActiveRoomWithAudio(appId: string, contextType: string, contextId: string) {
+    const reason = this.mediaUnavailableReason();
+    if (reason || !this.media) {
+      throw new ServiceUnavailableException(reason ?? 'Janus disabled');
+    }
     const room = await this.findRoom(appId, contextType, contextId);
     if (room.status !== 'ACTIVE') {
       throw new BadRequestException(`Room is ${room.status}. Mic control requires ACTIVE room.`);
@@ -608,17 +896,20 @@ export class RoomsService {
     if (!room.janusAudioRoomId) {
       throw new BadRequestException('Room has no AudioBridge provisioned.');
     }
-    if (!this.janus.isAvailable()) {
-      throw new BadRequestException('Janus Gateway is unavailable.');
-    }
-    return room;
+    return { room, janus: this.media };
   }
 
   /**
    * Find an ACTIVE room that has a provisioned VideoRoom.
-   * Shared by video kick methods.
+   * Shared by video kick methods. Returns the room **and a non-null
+   * JanusService reference**. Throws a descriptive 503 / 400 when any
+   * precondition fails.
    */
   private async findActiveRoomWithVideo(appId: string, contextType: string, contextId: string) {
+    const reason = this.mediaUnavailableReason();
+    if (reason || !this.media) {
+      throw new ServiceUnavailableException(reason ?? 'Janus disabled');
+    }
     const room = await this.findRoom(appId, contextType, contextId);
     if (room.status !== 'ACTIVE') {
       throw new BadRequestException(`Room is ${room.status}. Video control requires ACTIVE room.`);
@@ -626,10 +917,7 @@ export class RoomsService {
     if (!room.janusVideoRoomId) {
       throw new BadRequestException('Room has no VideoRoom provisioned.');
     }
-    if (!this.janus.isAvailable()) {
-      throw new BadRequestException('Janus Gateway is unavailable.');
-    }
-    return room;
+    return { room, janus: this.media };
   }
 
   /**
@@ -639,8 +927,12 @@ export class RoomsService {
    * (set by the client at join time). The lookup splits on '|' and matches the
    * trailing segment exactly. Falls back to substring match for legacy clients.
    */
-  private async resolveParticipantId(roomId: number, domainUserId: string): Promise<number> {
-    const participants = await this.janus.listParticipants(roomId);
+  private async resolveParticipantId(
+    janus: MediaProvider,
+    roomId: number,
+    domainUserId: string,
+  ): Promise<number> {
+    const participants = await janus.listParticipants(roomId);
 
     // Primary: exact match on structured suffix after '|'
     const exactMatch = participants.find((p) => {
@@ -672,8 +964,12 @@ export class RoomsService {
    * Resolve a domain user ID to a Janus VideoRoom participant ID.
    * Same display name convention as AudioBridge: `DisplayName|domainUserId`.
    */
-  private async resolveVideoParticipantId(roomId: number, domainUserId: string): Promise<number> {
-    const participants = await this.janus.listVideoParticipants(roomId);
+  private async resolveVideoParticipantId(
+    janus: MediaProvider,
+    roomId: number,
+    domainUserId: string,
+  ): Promise<number> {
+    const participants = await janus.listVideoParticipants(roomId);
 
     const exactMatch = participants.find((p) => {
       const parts = p.display.split('|');
@@ -773,8 +1069,12 @@ export class RoomsService {
    * Logs out every active Matrix session for the given room. Invoked from
    * [close] so members can't keep reading chat history via their cached
    * Matrix tokens after the domain context ends.
+   *
+   * No-op when Matrix is disabled — there's nothing to log out of.
    */
   private async logoutRoomMembers(roomId: string): Promise<void> {
+    if (!this.chat) return;
+    const matrix = this.chat;
     const memberships = await this.prisma.communicationMembership.findMany({
       where: { roomId, leftAt: null },
       include: { user: true },
@@ -792,7 +1092,7 @@ export class RoomsService {
               )
             : null;
           if (cachedToken) {
-            await this.matrix.logoutMember(m.user.domainUserId, cachedToken);
+            await matrix.logoutMember(m.user.domainUserId, cachedToken);
           }
         } catch (err) {
           this.logger.debug(
