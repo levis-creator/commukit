@@ -312,7 +312,7 @@ services:
     volumes:
       - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
     environment:
-      LIVEKIT_KEYS: ${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-change-me-livekit-secret}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-change-me-livekit-secret}"
     ports:
       - "7880:7880"           # HTTP + WebSocket signaling
       - "7881:7881"           # TURN/TLS
