@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import { RedisService } from '../redis/redis.service';

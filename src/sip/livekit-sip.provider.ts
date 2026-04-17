@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { MEDIA_PROVIDER } from '../providers/tokens';
 import type { MediaProvider } from '../providers/media-provider.interface';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 export { MEDIA_PROVIDER, CHAT_PROVIDER, SIP_PROVIDER } from './tokens';
 export type {
   MediaProvider,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Global, Module } from '@nestjs/common';
 import { MEDIA_PROVIDER } from '../providers/tokens';
 import { LivekitService } from './livekit.service';

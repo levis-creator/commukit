@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Test, TestingModule } from '@nestjs/testing';
 import { JanusService } from './janus.service';
 import { RedisService } from '../redis/redis.service';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';

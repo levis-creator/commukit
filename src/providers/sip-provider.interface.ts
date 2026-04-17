@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 /**
  * SipProvider — backend-agnostic contract for the SIP bridge that links
  * softphone callers into a communications room's audio plane.

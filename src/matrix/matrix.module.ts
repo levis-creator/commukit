@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Levis Nyingi and commukit contributors
 import { Global, Module } from '@nestjs/common';
 import { MatrixService } from './matrix.service';
 import { CHAT_PROVIDER } from '../providers/tokens';
