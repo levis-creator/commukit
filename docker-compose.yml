@@ -180,7 +180,11 @@ services:
     restart: unless-stopped
     entrypoint: /conf/entrypoint.sh
     volumes:
-      - ./infra/synapse/homeserver.yaml:/conf/homeserver.yaml
+      # :ro — the rendered/substituted copy lives in /data inside the
+      # container. Mounting the source config read-only prevents the
+      # entrypoint from writing env-substituted values back to the host
+      # repo and bleeding deployment-specific secrets into commits.
+      - ./infra/synapse/homeserver.yaml:/conf/homeserver.yaml:ro
       - ./infra/synapse/synapse.log.config:/conf/synapse.log.config:ro
       - ./infra/synapse/entrypoint.sh:/conf/entrypoint.sh:ro
       - synapse_data:/data
