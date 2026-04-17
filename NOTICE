@@ -1,0 +1,13 @@
+Commukit
+Copyright (C) 2025 Levis Nyingi and commukit contributors
+
+This product includes software developed by Levis Nyingi
+(https://github.com/levis-creator/commukit).
+
+Third-party components used at runtime (each under its own license,
+not redistributed in this repository):
+  - Matrix Synapse — Apache-2.0
+  - Janus Gateway — GPL-3.0
+  - coturn — BSD-3-Clause
+  - Kamailio — GPL-2.0
+  - LiveKit Server — Apache-2.0
