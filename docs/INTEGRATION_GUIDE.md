@@ -17,14 +17,18 @@ This guide documents how any backend/app can integrate with the `vps-ke-communic
 
 The communications-service supports two media backends. The operator picks one via the `MEDIA_PROVIDER` env var. Your integration code doesn't change — the session response tells clients which provider is active via the `credentials.provider` field.
 
-| Provider | Default? | Auth model | Best for |
-|---|---|---|---|
-| **LiveKit** | Yes | Token-based (JWT minted by comms-service) | New deployments, modern clients, built-in TURN |
-| **Janus** | No (opt-in) | No client tokens — clients connect via WebSocket | Existing Janus deployments, full SIP bridge support |
+| Provider    | Default?    | Auth model                                       | Best for                                            |
+| ----------- | ----------- | ------------------------------------------------ | --------------------------------------------------- |
+| **LiveKit** | Yes         | Token-based (JWT minted by comms-service)        | New deployments, modern clients, built-in TURN      |
+| **Janus**   | No (opt-in) | No client tokens — clients connect via WebSocket | Existing Janus deployments, full SIP bridge support |
 
 Both providers expose identical API endpoints. The only difference is the credential shape in the session response.
 
 See [`PROVIDERS.md`](./PROVIDERS.md) for detailed documentation on each provider, or the standalone guides at [`docs/providers/LIVEKIT.md`](./providers/LIVEKIT.md) and [`docs/providers/JANUS.md`](./providers/JANUS.md).
+
+Important boundary: this guide covers embedded chat, audio, and video. It does
+not cover PSTN or carrier telephony. The optional SIP path is private
+softphone access only and does not connect to real phone numbers.
 
 ---
 
@@ -42,11 +46,10 @@ Your backend must sign short-lived JWTs for service-to-service calls:
 import * as jwt from 'jsonwebtoken';
 
 function signInternalToken(): string {
-  return jwt.sign(
-    { iss: 'your-backend-name' },
-    process.env.INTERNAL_SERVICE_SECRET,
-    { audience: 'communications-service', expiresIn: '60s' },
-  );
+  return jwt.sign({ iss: 'your-backend-name' }, process.env.INTERNAL_SERVICE_SECRET, {
+    audience: 'communications-service',
+    expiresIn: '60s',
+  });
 }
 ```
 
@@ -73,6 +76,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 { "roomId": "<comms-room-uuid>", "status": "PROVISIONED" }
 ```
@@ -81,12 +85,12 @@ This is **idempotent** — calling again with the same `appId + contextType + co
 
 ### Room modes
 
-| Mode | Chat (Matrix) | AudioBridge | VideoRoom | Typical use |
-|------|:---:|:---:|:---:|---|
-| `IN_PERSON` | Yes | Yes | No | Physical meeting room with audio mixing |
-| `HYBRID` | Yes | Yes | Yes | Mixed in-person + remote participants |
-| `REMOTE` | Yes | No | Yes | Fully remote video session |
-| `CHAT` | Yes | No | No | 1-to-1 DMs, text-only channels |
+| Mode        | Chat (Matrix) | AudioBridge | VideoRoom | Typical use                             |
+| ----------- | :-----------: | :---------: | :-------: | --------------------------------------- |
+| `IN_PERSON` |      Yes      |     Yes     |    No     | Physical meeting room with audio mixing |
+| `HYBRID`    |      Yes      |     Yes     |    Yes    | Mixed in-person + remote participants   |
+| `REMOTE`    |      Yes      |     No      |    Yes    | Fully remote video session              |
+| `CHAT`      |      Yes      |     No      |    No     | 1-to-1 DMs, text-only channels          |
 
 Room modes work identically regardless of which media provider is active (LiveKit or Janus). The comms service abstracts the backend.
 
@@ -167,9 +171,7 @@ described below. Omit the header to receive the v1 shape (deprecated but still s
       "room": "comms-789012",
       "url": "wss://livekit.example.org",
       "token": "eyJhbGciOiJIUzI1NiJ9...",
-      "iceServers": [
-        { "urls": ["stun:stun.l.google.com:19302"] }
-      ]
+      "iceServers": [{ "urls": ["stun:stun.l.google.com:19302"] }]
     }
   },
   "modeImmutable": true
@@ -242,6 +244,7 @@ GET /your-domain/:id/communications-session
 ```
 
 This endpoint:
+
 1. Authenticates the calling user (your JWT)
 2. Checks domain-level authorization (e.g. is user invited to this meeting?)
 3. Calls communications-service `authorize-user`
@@ -305,7 +308,7 @@ if (session.audioBridge?.status == 'available') {
 ```javascript
 const session = await fetch('/your-api/meetings/123/communications-session', {
   headers: { Authorization: `Bearer ${userToken}` },
-}).then(r => r.json());
+}).then((r) => r.json());
 
 // Chat via Matrix JS SDK
 if (session.chat?.status === 'available') {
@@ -477,6 +480,7 @@ GET /health
 ```
 
 **Response:**
+
 ```json
 {
   "status": "ok",
@@ -495,10 +499,10 @@ If Matrix or the media provider is unreachable, the respective field shows `"unr
 
 The communications-service publishes events on the `comms_events_fanout` exchange:
 
-| Event | Payload |
-|-------|---------|
+| Event                             | Payload                                           |
+| --------------------------------- | ------------------------------------------------- |
 | `communications.room.provisioned` | `{ roomId, appId, contextType, contextId, mode }` |
-| `communications.room.activated` | `{ roomId, appId, contextType, contextId }` |
-| `communications.room.closed` | `{ roomId, appId, contextType, contextId }` |
+| `communications.room.activated`   | `{ roomId, appId, contextType, contextId }`       |
+| `communications.room.closed`      | `{ roomId, appId, contextType, contextId }`       |
 
 Subscribe to these if your other services need to react to room lifecycle changes (e.g. to start recording when a room activates).

@@ -37,12 +37,12 @@ credentials.
 
 ## Why AudioBridge / IN_PERSON Mode for Voice Calls
 
-| Concern | IN_PERSON (AudioBridge / LiveKit audio) | REMOTE (VideoRoom / LiveKit video) |
-|---|---|---|
-| Server-enforced mute | Yes | Depends on provider |
-| Bandwidth to client | Flat — one mixed stream (Janus) / optimized tracks (LiveKit) | Per-participant streams |
-| Recording | One mixed file | Per-participant files |
-| Good for | Voice calls, phone-style UX, broadcast | Video calls with optional video off |
+| Concern              | IN_PERSON (AudioBridge / LiveKit audio)                      | REMOTE (VideoRoom / LiveKit video)  |
+| -------------------- | ------------------------------------------------------------ | ----------------------------------- |
+| Server-enforced mute | Yes                                                          | Depends on provider                 |
+| Bandwidth to client  | Flat — one mixed stream (Janus) / optimized tracks (LiveKit) | Per-participant streams             |
+| Recording            | One mixed file                                               | Per-participant files               |
+| Good for             | Voice calls, phone-style UX, broadcast                       | Video calls with optional video off |
 
 Voice calls go through `IN_PERSON` mode. If the user later turns on a
 camera, you've made a product decision — either (a) use `REMOTE` from
@@ -165,7 +165,9 @@ router.post('/voice-calls/:id/hangup', requireAuth, async (req, res, next) => {
 
     const endStatus =
       call.status === 'RINGING'
-        ? (req.user.id === call.calleeId ? 'DECLINED' : 'CANCELLED')
+        ? req.user.id === call.calleeId
+          ? 'DECLINED'
+          : 'CANCELLED'
         : 'ENDED';
 
     await db.voiceCall.update({
@@ -202,17 +204,20 @@ Same flow, more authorized users. Two real considerations:
 - **Participant cap.** Both providers handle dozens of participants
   well. For hundreds, see
   [07-troubleshooting.md](07-troubleshooting.md#scaling).
+- **PSTN boundary.** These are app-scoped voice rooms, not carrier phone
+  calls. No real phone numbers are dialed unless you build a separate PSTN
+  architecture outside comms-service.
 
 ---
 
 ## UX Considerations
 
-| Concern | Recommendation |
-|---|---|
-| **Pre-flight mic check** | Let the client open the mic stream before `POST /voice-calls` so the user isn't greeted with a permission prompt after the callee picks up. |
-| **Ringtone / ringback** | Play locally on each client. Comms doesn't generate tones. |
-| **Busy / Do Not Disturb** | Check in your ringing layer before calling `provisionRoom`. If the callee is busy, transition to `MISSED` without provisioning. |
-| **Reconnection** | If a participant drops, re-`GET /communications-session`. Same coordinates come back while the room is `ACTIVE`. LiveKit tokens may need to be refreshed if expired (15-min TTL). |
-| **Call history** | Persist `voiceCall` rows in your DB. Your `status` + timestamps become the history. |
-| **Hold / resume** | Client-side local mute + display the "on hold" label. No server support needed. |
-| **Missed calls** | Subscribe to `communications.room.closed` events; if your DB still shows `RINGING` for that `contextId`, mark `MISSED` and push a notification. |
+| Concern                   | Recommendation                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pre-flight mic check**  | Let the client open the mic stream before `POST /voice-calls` so the user isn't greeted with a permission prompt after the callee picks up.                                       |
+| **Ringtone / ringback**   | Play locally on each client. Comms doesn't generate tones.                                                                                                                        |
+| **Busy / Do Not Disturb** | Check in your ringing layer before calling `provisionRoom`. If the callee is busy, transition to `MISSED` without provisioning.                                                   |
+| **Reconnection**          | If a participant drops, re-`GET /communications-session`. Same coordinates come back while the room is `ACTIVE`. LiveKit tokens may need to be refreshed if expired (15-min TTL). |
+| **Call history**          | Persist `voiceCall` rows in your DB. Your `status` + timestamps become the history.                                                                                               |
+| **Hold / resume**         | Client-side local mute + display the "on hold" label. No server support needed.                                                                                                   |
+| **Missed calls**          | Subscribe to `communications.room.closed` events; if your DB still shows `RINGING` for that `contextId`, mark `MISSED` and push a notification.                                   |

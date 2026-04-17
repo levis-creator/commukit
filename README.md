@@ -45,6 +45,10 @@ Avoid it when you need:
 - Very large broadcast streaming
 - A public or federated chat product
 
+PSTN note: the SIP capability in this repository is private softphone access
+only. It does not dial real phone numbers, does not accept carrier calls, and
+does not act as a public telephone gateway.
+
 ## Mental Model
 
 ```text
@@ -89,6 +93,23 @@ This service helps with transport and session lifecycle, but your app still owns
 | Audio      | Janus AudioBridge           | Mixer model, server-enforced mute |
 | Video      | Janus VideoRoom             | SFU model                         |
 | SIP        | Kamailio + Janus SIP plugin | Free softphone access, no PSTN    |
+
+## Capacity At A Glance
+
+These numbers are practical starting points for the shipped setup, not a
+universal SLA:
+
+| Capability                | Current guidance                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| LiveKit rooms             | The bundled single-node config caps a room at **200 participants** (`infra/livekit/livekit.yaml`).                         |
+| Janus AudioBridge         | Best for **dozens of active speakers**. It can handle **hundreds of listeners** when only a handful are unmuted at a time. |
+| Small-group voice calls   | Both providers handle **dozens of participants** comfortably for interactive calls.                                        |
+| Webinar / broadcast scale | **Not covered**. If you need **thousands of listeners**, use a separate HLS/DASH or broadcast pipeline.                    |
+| SIP softphones            | Private, app-scoped SIP only. **No PSTN numbers**, **no carrier ingress**, **no emergency calling**.                       |
+
+Inside this workspace, the current `vps_ke_app` client consumes chat,
+audio, and video session blocks only. It does not expose a SIP or PSTN user
+flow.
 
 ## Documentation Map
 
