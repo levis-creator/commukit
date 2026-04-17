@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025 Levis Nyingi and commukit contributors
-import {
-  IsEnum,
-  IsNotEmpty,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsEnum, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
@@ -22,11 +17,6 @@ export enum RoomMode {
   /** Chat-only: provisions a Matrix room with no Janus audio/video. */
   CHAT = 'CHAT',
 }
-
-/** @deprecated Use [RoomMode]. Kept as an alias for one release cycle. */
-export const SittingMode = RoomMode;
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-export type SittingMode = RoomMode;
 
 export class ProvisionRoomDto {
   @ApiProperty({
