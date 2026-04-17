@@ -70,7 +70,7 @@ Optional footer (BREAKING CHANGE, Closes #123, Co-Authored-By, etc.).
 
 **Allowed types:** `feat`, `fix`, `docs`, `chore`, `ci`, `build`, `test`, `refactor`, `perf`, `revert`.
 
-**Breaking changes:** use `feat!:` (or any type with `!`) *and* include a `BREAKING CHANGE:` footer describing the impact.
+**Breaking changes:** use `feat!:` (or any type with `!`) _and_ include a `BREAKING CHANGE:` footer describing the impact.
 
 Examples:
 
@@ -157,3 +157,92 @@ The script is idempotent — files that already carry the header are left alone.
 ## Code of Conduct
 
 By participating you agree to uphold our [Code of Conduct](CODE_OF_CONDUCT.md). Report violations to `levis.nyingi@gmail.com`.
+
+---
+
+## Before You Open a PR
+
+Not every change is a straight-line merge. Four categories require a GitHub Discussion or issue **before** code lands, so effort isn't invested in a direction we might ask you to unwind:
+
+1. **Public API changes** — new `/internal/v1/*` endpoints, new response fields, new required headers, or breaking shape changes to existing endpoints.
+2. **New runtime dependencies** — anything added to the top-level `dependencies` in `package.json` (dev deps are fine).
+3. **Room-mode or provisioning semantics** — changing what `IN_PERSON` / `HYBRID` / `REMOTE` / `CHAT` mean, adding a new mode, or changing the `(appId, contextType, contextId)` key shape.
+4. **JWT or auth-model changes** — anything touching `src/auth/`, the `aud: "communications-service"` claim, or `INTERNAL_SERVICE_SECRET` handling.
+
+PRs in these categories opened without a linked Discussion may be closed without review. Tag the PR body with `Refs: #<discussion-or-issue>` so reviewers can find the context.
+
+For everything else (bug fixes, tests, docs, CI tweaks, provider-internal refactors, Dependabot updates), open a PR directly.
+
+## Triage & Response SLA
+
+Targets, not guarantees:
+
+- **Issues:** first maintainer response within **7 calendar days**.
+- **PRs:** first maintainer response within **14 calendar days**.
+- **Security reports** (per [`SECURITY.md`](SECURITY.md)): acknowledgment within 7 days, substantive reply within 14.
+
+If you haven't heard back within the target window, a polite ping on the thread is welcome. Life happens — the SLA is a floor, not a ceiling, and busy windows are handled by rolling slippage with explicit status updates.
+
+## Label Taxonomy
+
+Labels are version-controlled in [`.github/labels.yml`](.github/labels.yml) and reconciled to the repo by the `label-sync` workflow. Do not create labels manually in the GitHub UI.
+
+Categories:
+
+- **`type/*`** — kind of change: `type/bug`, `type/feature`, `type/docs`, `type/chore`, `type/security`.
+- **`capability/*`** — which user-facing capability is affected: `chat`, `audio`, `video`, `sip`, `health`.
+- **`provider/*`** — which transport backend: `matrix`, `janus`, `livekit`, `kamailio`.
+- **`status/*`** — where in the workflow the item sits: `needs-triage`, `needs-info`, `needs-design`, `blocked`, `help-wanted`, `in-progress`, `needs-review`.
+- **`priority/*`** — urgency: `p0-critical` (drop everything else), `p1-high`, `p2-normal` (default), `p3-low`.
+- **`resolution/*`** — why it was closed: `duplicate`, `wontfix`, `out-of-scope`, `cannot-reproduce`.
+- **Onboarding** — `good-first-issue`, `help-wanted`.
+- **Meta** — `pinned` (exempt from stale-bot closure).
+
+Path-based labels (`provider/*`, `capability/*`, `type/*`) are auto-applied to PRs by [`.github/labeler.yml`](.github/labeler.yml). Everything else is set by a maintainer during triage.
+
+## Merge Rubric
+
+Three tiers the maintainers use to decide how to handle a contribution. Stating them openly so rejections feel principled, not personal.
+
+### Auto-accept tier (low-risk, high-value)
+
+These land with a simple approving review once CI is green:
+
+- Bug fix with a regression test.
+- Documentation improvement.
+- Test coverage addition on an existing path.
+- Dependabot update (npm / docker / github-actions).
+- CI or workflow improvement that doesn't change developer-facing behavior.
+
+### Discussion-required tier (needs an issue or Discussion first)
+
+Open an issue or Discussion describing intent before the PR:
+
+- New API endpoint.
+- New provider adapter (`MediaProvider` / `ChatProvider` / `SipProvider` implementation).
+- JWT or authorization model change.
+- New runtime dependency.
+- Prisma schema migration.
+- Performance change that alters resource use (memory, CPU, network behavior).
+
+If a PR in this tier arrives without a linked Discussion, maintainers will ask for one before reviewing in depth.
+
+### Reject-by-default tier (out of scope)
+
+Anything in the "Out of scope" section of [`docs/SCOPE.md`](docs/SCOPE.md) is closed with a reference to the relevant clause and an invitation to open a Discussion if the contributor believes the scope should change. Typical cases:
+
+- PSTN / carrier telephony.
+- End-to-end encrypted media.
+- Federation between commukit instances.
+- Anything that routes media bytes through the commukit service.
+- Anything consumer-app-specific (Parliament, etc.).
+
+## Stale Policy
+
+Automated by [`.github/workflows/stale.yml`](.github/workflows/stale.yml). Published here so nothing the bot does is a surprise:
+
+- **Issues** carrying `status/needs-info`: go stale after **30 days** of no activity, closed **7 days** after that. The stale comment explains how to revive: add the requested info, or remove `status/needs-info` to put the issue back in the triage queue.
+- **PRs**: go stale after **60 days** of no activity, closed **14 days** after that. Any push, comment, or review-request resets the clock.
+- **Exempt labels** (bot will not touch): `priority/p0-critical`, `status/blocked`, `status/help-wanted`, `pinned`.
+
+If you need an issue or PR to be exempt for legitimate reasons, ask a maintainer to add `pinned` or move it to `status/blocked` with a linked blocker.
