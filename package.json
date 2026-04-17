@@ -1,9 +1,33 @@
 {
-  "name": "vps-ke-communications-service",
+  "name": "commukit",
   "version": "0.0.0",
-  "description": "Shared communications microservice — room-based chat and calls via Matrix + LiveKit (Janus fallback)",
+  "description": "Reusable multi-tenant communications microservice — chat, audio, video, and SIP room provisioning via pluggable Matrix, Janus, LiveKit, and Kamailio adapters.",
   "private": true,
   "license": "Apache-2.0",
+  "author": "Levis Nyingi <levis.nyingi@gmail.com>",
+  "homepage": "https://github.com/levis-creator/commukit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/levis-creator/commukit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/levis-creator/commukit/issues"
+  },
+  "keywords": [
+    "communications",
+    "microservice",
+    "nestjs",
+    "matrix",
+    "janus",
+    "livekit",
+    "kamailio",
+    "sip",
+    "webrtc",
+    "chat"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "nest build",
     "lint": "eslint .",
