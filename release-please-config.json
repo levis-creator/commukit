@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "packages": {
+    ".": {
+      "release-as": "0.1.0",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "pull-request-title-pattern": "chore${scope}: release${component} ${version}",
+      "pull-request-header": ":robot: release-please — review carefully, bump types follow Conventional Commits since the last release.",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "draft": false,
+      "prerelease": false
+    }
+  },
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation", "hidden": false },
+    { "type": "build", "section": "Build", "hidden": false },
+    { "type": "ci", "section": "CI", "hidden": false },
+    { "type": "chore", "section": "Miscellaneous", "hidden": false },
+    { "type": "refactor", "section": "Refactors", "hidden": false },
+    { "type": "test", "section": "Tests", "hidden": false }
+  ],
+  "separate-pull-requests": false
+}

@@ -1,6 +1,6 @@
 {
   "name": "vps-ke-communications-service",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Shared communications microservice — room-based chat and calls via Matrix + LiveKit (Janus fallback)",
   "private": true,
   "license": "Apache-2.0",
