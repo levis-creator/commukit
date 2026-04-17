@@ -1,5 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // `native` covers local macOS / Linux glibc development; the musl
+  // target is required for the Alpine-based production Docker image
+  // (Prisma's autodetection defaults to openssl-1.1.x which doesn't
+  // exist in current node:20-alpine, so the schema engine fails).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
