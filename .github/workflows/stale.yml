@@ -1,0 +1,61 @@
+name: Stale
+
+on:
+  schedule:
+    # Daily at 07:42 UTC
+    - cron: '42 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark and close stale issues / PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Issues carrying `status/needs-info` go stale after 30 days
+          # of no activity, closed 7 days after that.
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          only-issue-labels: 'status/needs-info'
+          stale-issue-label: 'status/stale'
+          stale-issue-message: |
+            This issue has been inactive for 30 days while carrying
+            `status/needs-info`. It will be closed in 7 days if there is
+            no further activity. To revive: comment with the requested
+            info or remove the `status/needs-info` label and we'll re-open
+            the queue.
+          close-issue-message: |
+            Closing as stale. If the question becomes relevant again,
+            please reopen with the requested information or file a fresh
+            issue linking to this thread.
+
+          # PRs go stale after 60 days of no activity, closed 14 days after.
+          days-before-pr-stale: 60
+          days-before-pr-close: 14
+          stale-pr-label: 'status/stale'
+          stale-pr-message: |
+            This PR has been inactive for 60 days. It will be closed in
+            14 days if there is no further activity. To revive: push a
+            new commit, leave a comment, or request review.
+          close-pr-message: |
+            Closing as stale. Please reopen (or open a fresh PR) when
+            you're ready to continue. Thanks for the contribution.
+
+          # Exempt labels apply to both issues and PRs.
+          exempt-issue-labels: 'priority/p0-critical,status/blocked,status/help-wanted,pinned'
+          exempt-pr-labels: 'priority/p0-critical,status/blocked,status/help-wanted,pinned'
+
+          # Be deliberate: only act on a limited number of items per run
+          # so an accidental mis-configuration doesn't spray the queue.
+          operations-per-run: 50
+
+          # Start marking from the oldest first.
+          ascending: true

@@ -1,0 +1,20 @@
+# Config for kentaro-m/auto-assign-action (invoked by auto-assign workflow).
+#
+# Requests review from CODEOWNERS entries on every PR so it doesn't depend
+# on the contributor remembering to ping someone.
+
+addReviewers: true
+addAssignees: false
+
+# useReviewGroups=false + numberOfReviewers=0 means "use the list below
+# directly" rather than sampling a subset. Keeps behavior predictable.
+useReviewGroups: false
+numberOfReviewers: 0
+
+reviewers:
+  - levis-creator
+
+# Skip auto-assign when the PR body contains one of these keywords.
+skipKeywords:
+  - wip
+  - do-not-review

@@ -1,0 +1,89 @@
+# Path-based auto-labeling rules for actions/labeler@v5.
+# Applied to PRs by .github/workflows/labeler.yml on open / synchronize.
+#
+# Syntax: each top-level key is the label to apply; the value is a list of
+# match rules using `changed-files` with glob patterns.
+# See: https://github.com/actions/labeler/blob/main/docs/syntax.md
+
+# ─── Capability × Provider for src/ modules ──────────────────────────────────
+'provider/matrix':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/matrix/**'
+'capability/chat':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/matrix/**'
+
+'provider/janus':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/janus/**'
+'capability/audio':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/janus/**'
+          - 'src/livekit/**'
+'capability/video':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/janus/**'
+          - 'src/livekit/**'
+
+'provider/livekit':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/livekit/**'
+
+'provider/kamailio':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/sip/**'
+'capability/sip':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/sip/**'
+
+'capability/health':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/health/**'
+
+# ─── Type inferred from path ─────────────────────────────────────────────────
+'type/docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - 'README.md'
+          - 'ROADMAP.md'
+          - 'RELEASING.md'
+          - 'MAINTAINERS.md'
+          - 'CONTRIBUTING.md'
+          - 'CODE_OF_CONDUCT.md'
+          - 'GOVERNANCE.md'
+          - 'CREDITS.md'
+          - 'SECURITY.md'
+
+'type/chore':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - '.husky/**'
+          - '.editorconfig'
+          - '.nvmrc'
+          - '.prettierrc*'
+          - '.prettierignore'
+          - '.eslintignore'
+          - '.commitlintrc*'
+          - '.lintstagedrc*'
+          - 'eslint.config.*'
+          - '.gitignore'
+          - '.dockerignore'
+
+'type/feature':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/rooms/**'
+          - 'src/providers/**'
+          - 'src/auth/**'
+          - 'src/users/**'

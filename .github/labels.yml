@@ -1,0 +1,119 @@
+# Version-controlled label taxonomy for commukit.
+#
+# Synced to GitHub by .github/workflows/label-sync.yml on every push to main
+# that touches this file. DO NOT create labels manually in the GitHub UI;
+# edit this file and let the workflow reconcile.
+#
+# Format is EndBug/label-sync -- each entry: name, description, color (6-digit hex).
+
+# ─── Type ────────────────────────────────────────────────────────────────────
+- name: type/bug
+  description: Something is broken or behaves incorrectly
+  color: d73a4a
+- name: type/feature
+  description: New feature or enhancement
+  color: a2eeef
+- name: type/docs
+  description: Documentation-only change
+  color: 0075ca
+- name: type/chore
+  description: Tooling, dependencies, repo hygiene
+  color: cfd3d7
+- name: type/security
+  description: Security-sensitive issue or change
+  color: b60205
+
+# ─── Capability ──────────────────────────────────────────────────────────────
+- name: capability/chat
+  description: Chat rooms / Matrix-backed features
+  color: 5319e7
+- name: capability/audio
+  description: Audio rooms / AudioBridge / LiveKit audio
+  color: 5319e7
+- name: capability/video
+  description: Video rooms / VideoRoom / LiveKit video
+  color: 5319e7
+- name: capability/sip
+  description: SIP softphone / Kamailio / Janus SIP
+  color: 5319e7
+- name: capability/health
+  description: /health endpoint and capability status reporting
+  color: 5319e7
+
+# ─── Provider ────────────────────────────────────────────────────────────────
+- name: provider/matrix
+  description: Matrix Synapse chat provider
+  color: 1d76db
+- name: provider/janus
+  description: Janus Gateway media provider
+  color: 1d76db
+- name: provider/livekit
+  description: LiveKit media / SIP provider
+  color: 1d76db
+- name: provider/kamailio
+  description: Kamailio SIP registrar
+  color: 1d76db
+
+# ─── Status ──────────────────────────────────────────────────────────────────
+- name: status/needs-triage
+  description: Awaiting maintainer triage
+  color: fbca04
+- name: status/needs-info
+  description: Waiting on more information from the reporter
+  color: fbca04
+- name: status/needs-design
+  description: Needs design / Discussion before implementation
+  color: fbca04
+- name: status/blocked
+  description: Blocked on an upstream dependency or another change
+  color: fbca04
+- name: status/help-wanted
+  description: Maintainers would welcome outside help on this
+  color: 008672
+- name: status/in-progress
+  description: Someone is actively working on this
+  color: fbca04
+- name: status/needs-review
+  description: Awaiting maintainer review
+  color: fbca04
+
+# ─── Priority ────────────────────────────────────────────────────────────────
+- name: priority/p0-critical
+  description: Service-down / security / data-loss — drop everything else
+  color: b60205
+- name: priority/p1-high
+  description: Important; affects correctness or a significant feature
+  color: d93f0b
+- name: priority/p2-normal
+  description: Default priority
+  color: fbca04
+- name: priority/p3-low
+  description: Low urgency; nice-to-have
+  color: 0e8a16
+
+# ─── Resolution ──────────────────────────────────────────────────────────────
+- name: resolution/duplicate
+  description: Duplicate of an existing issue or PR
+  color: cccccc
+- name: resolution/wontfix
+  description: Declining to address as reported
+  color: cccccc
+- name: resolution/out-of-scope
+  description: Out of scope per docs/SCOPE.md
+  color: cccccc
+- name: resolution/cannot-reproduce
+  description: Could not reproduce the reported behavior
+  color: cccccc
+
+# ─── Onboarding ──────────────────────────────────────────────────────────────
+- name: good-first-issue
+  description: Good entry point for new contributors
+  color: 7057ff
+- name: help-wanted
+  description: Outside help welcome (shorthand alias of status/help-wanted)
+  color: 008672
+
+# ─── Meta ────────────────────────────────────────────────────────────────────
+- name: pinned
+  description: Exempt from stale-bot closure
+  color: 0052cc
