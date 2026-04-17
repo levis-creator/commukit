@@ -1,0 +1,14 @@
+{
+  "name": "commukit-minimal-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Minimal end-to-end example: provision a room and authorize a user against a running commukit service.",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
+  }
+}
