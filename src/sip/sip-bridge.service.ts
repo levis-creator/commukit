@@ -494,7 +494,7 @@ export class SipBridgeService
     if (room.status !== 'ACTIVE') {
       return rejectWith('SIP_CALL_REJECTED_ROOM_INACTIVE', `Room status ${room.status}`);
     }
-    if (!room.janusAudioRoomId) {
+    if (!room.audioRoomId) {
       return rejectWith('SIP_CALL_REJECTED_ROOM_NOT_FOUND', 'Room has no AudioBridge');
     }
 
@@ -550,7 +550,7 @@ export class SipBridgeService
     callId: string;
     senderHandleId: string;
     jsep: any;
-    room: { id: string; contextId: string; contextType: string; appId: string; janusAudioRoomId: number | null };
+    room: { id: string; contextId: string; contextType: string; appId: string; audioRoomId: number | null };
     user: { id: string; domainUserId: string; displayName: string };
     sipUsername: string;
   }): Promise<void> {
@@ -578,7 +578,7 @@ export class SipBridgeService
     // The join succeeds but no RTP flows until rtpengine is wired in.
     await this.bridgeMediaToAudioBridge({
       audioHandleId,
-      audioBridgeRoomId: args.room.janusAudioRoomId!,
+      audioBridgeRoomId: args.room.audioRoomId!,
       display: `${args.sipUsername}|${args.user.domainUserId}`,
     });
 
@@ -587,7 +587,7 @@ export class SipBridgeService
       sipSessionId: this.sipSessionId,
       sipHandleId: args.senderHandleId,
       audioHandleId,
-      audioBridgeRoomId: args.room.janusAudioRoomId,
+      audioBridgeRoomId: args.room.audioRoomId,
       contextId: args.room.contextId,
       contextType: args.room.contextType,
       appId: args.room.appId,

@@ -1,12 +1,19 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export enum CommunicationRole {
+  MODERATOR = 'MODERATOR',
+  PARTICIPANT = 'PARTICIPANT',
+  OBSERVER = 'OBSERVER',
+}
 
 export class AuthorizeUserDto {
   @ApiProperty({
@@ -62,9 +69,8 @@ export class AuthorizeUserDto {
     maxItems: 32,
   })
   @IsArray()
-  @IsString({ each: true })
+  @IsEnum(CommunicationRole, { each: true })
   @IsOptional()
   @ArrayMaxSize(32)
-  @MaxLength(64, { each: true })
-  roles?: string[];
+  roles?: CommunicationRole[];
 }

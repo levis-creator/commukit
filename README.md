@@ -11,9 +11,9 @@ This repository lives inside the broader `vps-ke-parliament` workspace, but the 
 This service exists to hide the operational glue around embedded communications:
 
 - Matrix Synapse for chat
-- Janus Gateway for audio and video
-- coturn for NAT traversal
-- Kamailio plus the Janus SIP plugin for free softphone access
+- LiveKit for audio and video (default) — or Janus Gateway as an opt-in fallback
+- coturn for NAT traversal (with Janus) or LiveKit's built-in TURN
+- Kamailio plus the Janus SIP plugin for free softphone access (Janus path only)
 
 Your backend does not talk to Matrix or Janus directly. It talks to this service using an internal JWT. Your clients then connect directly to the returned chat and media backends using scoped credentials.
 
@@ -42,9 +42,9 @@ Avoid it when you need:
 ## Mental Model
 
 ```text
-Your backend --internal JWT--> communications-service --admin APIs--> Matrix / Janus
+Your backend --internal JWT--> communications-service --admin APIs--> Matrix / LiveKit (or Janus)
 Your client  <--scoped creds-- communications-service
-Your client  --direct connect-----------------------> Matrix / Janus / TURN
+Your client  --direct connect-----------------------> Matrix / LiveKit (or Janus) / TURN
 ```
 
 Three rules matter most:

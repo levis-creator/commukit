@@ -21,6 +21,11 @@ export class InternalJwtGuard implements CanActivate {
   constructor() {
     this.secret = process.env.INTERNAL_SERVICE_SECRET ?? '';
     if (!this.secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'INTERNAL_SERVICE_SECRET must be set in production — refusing to start without it.',
+        );
+      }
       this.logger.warn(
         'INTERNAL_SERVICE_SECRET is not set. Internal endpoints will reject all requests.',
       );
@@ -40,6 +45,7 @@ export class InternalJwtGuard implements CanActivate {
     try {
       const payload = jwt.verify(token, this.secret, {
         audience: 'communications-service',
+        algorithms: ['HS256'],
       });
       request.internalCaller = payload;
       return true;

@@ -199,7 +199,7 @@ export class LivekitService implements MediaProvider, OnModuleInit, OnModuleDest
         iss: this.apiKey,
         sub: args.identity,
         nbf: nowSeconds - 10,
-        exp: nowSeconds + 60 * 60,
+        exp: nowSeconds + 15 * 60,
         name: args.name,
         metadata: args.metadata ? JSON.stringify(args.metadata) : undefined,
         video: {

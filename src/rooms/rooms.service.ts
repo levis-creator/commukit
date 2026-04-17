@@ -22,7 +22,7 @@ import type { ChatProvider } from '../providers/chat-provider.interface';
 import type { MediaProvider } from '../providers/media-provider.interface';
 import type { SipProvider } from '../providers/sip-provider.interface';
 import { ProvisionRoomDto, RoomMode } from './dto/provision-room.dto';
-import { AuthorizeUserDto } from './dto/authorize-user.dto';
+import { AuthorizeUserDto, CommunicationRole } from './dto/authorize-user.dto';
 
 /** Base shape for each capability in a session response. */
 export interface CapabilityStatus {
@@ -260,22 +260,6 @@ export class RoomsService {
     return null;
   }
 
-  private isLivekitMediaProvider(
-    media: MediaProvider | undefined,
-  ): media is MediaProvider & {
-    id: 'livekit';
-    roomNameFor(roomId: number): string;
-    createParticipantToken(args: {
-      roomId: number;
-      identity: string;
-      name: string;
-      metadata?: Record<string, unknown>;
-      roomAdmin?: boolean;
-    }): Promise<string>;
-  } {
-    return !!media && media.id === 'livekit';
-  }
-
   private sipUnavailableReason(): string | null {
     if (!this.sip) return 'SIP disabled';
     // When SipBridgeService detected an incompatible media provider at
@@ -334,14 +318,14 @@ export class RoomsService {
     // CHAT mode skips Janus entirely — Matrix room only.
     // When Janus is disabled, both ids stay null and the corresponding
     // capabilities report unavailable on subsequent authorizeUser calls.
-    let janusAudioRoomId: number | null = null;
-    let janusVideoRoomId: number | null = null;
+    let audioRoomId: number | null = null;
+    let videoRoomId: number | null = null;
 
     if (this.media && (dto.mode === RoomMode.IN_PERSON || dto.mode === RoomMode.HYBRID)) {
-      janusAudioRoomId = await this.media.ensureAudioBridgeRoom(dto.contextId);
+      audioRoomId = await this.media.ensureAudioBridgeRoom(dto.contextId);
     }
     if (this.media && (dto.mode === RoomMode.HYBRID || dto.mode === RoomMode.REMOTE)) {
-      janusVideoRoomId = await this.media.ensureVideoRoom(dto.contextId);
+      videoRoomId = await this.media.ensureVideoRoom(dto.contextId);
     }
 
     const room = await this.prisma.communicationRoom.create({
@@ -352,8 +336,8 @@ export class RoomsService {
         title: dto.title,
         mode: dto.mode,
         matrixRoomId,
-        janusAudioRoomId,
-        janusVideoRoomId,
+        audioRoomId,
+        videoRoomId,
       },
     });
 
@@ -362,8 +346,8 @@ export class RoomsService {
       contextType: dto.contextType,
       mode: dto.mode,
       matrixAvailable: !!matrixRoomId,
-      janusAudioAvailable: !!janusAudioRoomId,
-      janusVideoAvailable: !!janusVideoRoomId,
+      janusAudioAvailable: !!audioRoomId,
+      janusVideoAvailable: !!videoRoomId,
     });
 
     this.messaging.publish('communications.room.provisioned', {
@@ -425,14 +409,15 @@ export class RoomsService {
       );
     }
 
-    // Best-effort cleanup of Janus VideoRoom (skipped when Janus disabled).
-    if (this.media && room.janusVideoRoomId) {
-      await this.media.destroyVideoRoom(contextId, room.janusVideoRoomId);
-    } else if (
-      this.isLivekitMediaProvider(this.media) &&
-      room.janusAudioRoomId
-    ) {
-      await this.media.destroyVideoRoom(contextId, room.janusAudioRoomId);
+    // Best-effort cleanup of media rooms (idempotent — LiveKit audio and video
+    // may share the same underlying room, so a double-destroy is a no-op).
+    if (this.media) {
+      if (room.videoRoomId) {
+        await this.media.destroyVideoRoom(contextId, room.videoRoomId).catch(() => {});
+      }
+      if (room.audioRoomId) {
+        await this.media.destroyVideoRoom(contextId, room.audioRoomId).catch(() => {});
+      }
     }
 
     // Invalidate all active Matrix sessions for this room so members can't
@@ -617,7 +602,7 @@ export class RoomsService {
       create: {
         roomId: room.id,
         userId: commUser.id,
-        role: dto.roles?.includes('MODERATOR') ? 'MODERATOR' : 'PARTICIPANT',
+        role: dto.roles?.includes(CommunicationRole.MODERATOR) ? 'MODERATOR' : 'PARTICIPANT',
       },
       update: {},
     });
@@ -669,9 +654,9 @@ export class RoomsService {
     if (mode === 'IN_PERSON' || mode === 'HYBRID') {
       const janusReason = this.mediaUnavailableReason();
       if (this.media && !janusReason) {
-        const liveAudioRoomId = await this.media.ensureAudioBridgeRoom(room.contextId, room.janusAudioRoomId);
+        const liveAudioRoomId = await this.media.ensureAudioBridgeRoom(room.contextId, room.audioRoomId);
         if (liveAudioRoomId) {
-          if (this.isLivekitMediaProvider(this.media)) {
+          if (this.media.createParticipantToken) {
             const token = await this.media.createParticipantToken({
               roomId: liveAudioRoomId,
               identity: dto.domainUserId,
@@ -683,15 +668,15 @@ export class RoomsService {
                 mode: room.mode,
                 roles: dto.roles ?? [],
               },
-              roomAdmin: !!dto.roles?.includes('MODERATOR'),
+              roomAdmin: !!dto.roles?.includes(CommunicationRole.MODERATOR),
             });
             audioBridge = {
               status: 'available',
               credentials: {
-                provider: 'livekit',
-                room: this.media.roomNameFor(liveAudioRoomId),
+                provider: this.media.id as 'livekit',
+                room: this.media.roomNameFor?.(liveAudioRoomId) ?? liveAudioRoomId.toString(),
                 url: this.media.wsUrl,
-                token,
+                token: token!,
               },
             };
           } else {
@@ -714,7 +699,7 @@ export class RoomsService {
       } else {
         audioBridge = {
           status: 'unavailable',
-          reason: janusReason ?? (room.janusAudioRoomId ? 'Janus service unreachable' : 'AudioBridge room not provisioned'),
+          reason: janusReason ?? (room.audioRoomId ? 'Media provider unreachable' : 'AudioBridge room not provisioned'),
         };
       }
     }
@@ -724,10 +709,10 @@ export class RoomsService {
     if (mode === 'HYBRID' || mode === 'REMOTE') {
       const janusReason = this.mediaUnavailableReason();
       if (this.media && !janusReason) {
-        const liveVideoRoomId = await this.media.ensureVideoRoom(room.contextId, room.janusVideoRoomId);
+        const liveVideoRoomId = await this.media.ensureVideoRoom(room.contextId, room.videoRoomId);
         if (liveVideoRoomId) {
           const iceServers = this.media.buildIceServers();
-          if (this.isLivekitMediaProvider(this.media)) {
+          if (this.media.createParticipantToken) {
             const token = await this.media.createParticipantToken({
               roomId: liveVideoRoomId,
               identity: dto.domainUserId,
@@ -739,15 +724,15 @@ export class RoomsService {
                 mode: room.mode,
                 roles: dto.roles ?? [],
               },
-              roomAdmin: !!dto.roles?.includes('MODERATOR'),
+              roomAdmin: !!dto.roles?.includes(CommunicationRole.MODERATOR),
             });
             videoRoom = {
               status: 'available',
               credentials: {
-                provider: 'livekit',
-                room: this.media.roomNameFor(liveVideoRoomId),
+                provider: this.media.id as 'livekit',
+                room: this.media.roomNameFor?.(liveVideoRoomId) ?? liveVideoRoomId.toString(),
                 url: this.media.wsUrl,
-                token,
+                token: token!,
                 iceServers,
               },
             };
@@ -773,7 +758,7 @@ export class RoomsService {
       } else {
         videoRoom = {
           status: 'unavailable',
-          reason: janusReason ?? (room.janusVideoRoomId ? 'Janus service unreachable' : 'VideoRoom not provisioned'),
+          reason: janusReason ?? (room.videoRoomId ? 'Media provider unreachable' : 'VideoRoom not provisioned'),
         };
       }
     }
@@ -790,8 +775,8 @@ export class RoomsService {
         const password = sipResult.password ?? commUser.sipPassword ?? null;
         if (password) {
           const roomTarget =
-            this.isLivekitMediaProvider(this.media) && audioBridge?.credentials?.provider === 'livekit'
-              ? audioBridge.credentials.room
+            this.media?.roomNameFor && audioBridge?.credentials?.provider === 'livekit'
+              ? (audioBridge.credentials as LivekitAudioCredentials).room
               : null;
           sip = this.sip.buildSessionDescriptor(
             { username: sipResult.username, password },
@@ -841,8 +826,8 @@ export class RoomsService {
     domainUserId: string,
   ): Promise<{ success: boolean }> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
-    await janus.muteParticipant(room.janusAudioRoomId!, participantId);
+    const participantId = await this.resolveParticipantId(janus, room.audioRoomId!, domainUserId);
+    await janus.muteParticipant(room.audioRoomId!, participantId);
     await this.audit(room.id, 'MIC_MUTED', domainUserId, { participantId });
     return { success: true };
   }
@@ -858,8 +843,8 @@ export class RoomsService {
     domainUserId: string,
   ): Promise<{ success: boolean }> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
-    await janus.unmuteParticipant(room.janusAudioRoomId!, participantId);
+    const participantId = await this.resolveParticipantId(janus, room.audioRoomId!, domainUserId);
+    await janus.unmuteParticipant(room.audioRoomId!, participantId);
     await this.audit(room.id, 'MIC_UNMUTED', domainUserId, { participantId });
     return { success: true };
   }
@@ -874,7 +859,7 @@ export class RoomsService {
     contextType: string,
   ): Promise<{ success: boolean }> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    await janus.muteRoom(room.janusAudioRoomId!);
+    await janus.muteRoom(room.audioRoomId!);
     await this.audit(room.id, 'ROOM_MUTED', null, { reason: 'server_initiated' });
     return { success: true };
   }
@@ -888,7 +873,7 @@ export class RoomsService {
     contextType: string,
   ): Promise<Array<{ id: string | number; display: string; muted: boolean }>> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    return janus.listParticipants(room.janusAudioRoomId!);
+    return janus.listParticipants(room.audioRoomId!);
   }
 
   // ── Kick ───────────────────────────────────────────────────────────────────
@@ -904,8 +889,8 @@ export class RoomsService {
     domainUserId: string,
   ): Promise<{ success: boolean }> {
     const { room, janus } = await this.findActiveRoomWithAudio(appId, contextType, contextId);
-    const participantId = await this.resolveParticipantId(janus, room.janusAudioRoomId!, domainUserId);
-    await janus.kickAudioParticipant(room.janusAudioRoomId!, participantId);
+    const participantId = await this.resolveParticipantId(janus, room.audioRoomId!, domainUserId);
+    await janus.kickAudioParticipant(room.audioRoomId!, participantId);
     await this.audit(room.id, 'PARTICIPANT_KICKED_AUDIO', domainUserId, { participantId });
     return { success: true };
   }
@@ -921,8 +906,8 @@ export class RoomsService {
     domainUserId: string,
   ): Promise<{ success: boolean }> {
     const { room, janus } = await this.findActiveRoomWithVideo(appId, contextType, contextId);
-    const participantId = await this.resolveVideoParticipantId(janus, room.janusVideoRoomId!, domainUserId);
-    await janus.kickVideoParticipant(room.janusVideoRoomId!, participantId);
+    const participantId = await this.resolveVideoParticipantId(janus, room.videoRoomId!, domainUserId);
+    await janus.kickVideoParticipant(room.videoRoomId!, participantId);
     await this.audit(room.id, 'PARTICIPANT_KICKED_VIDEO', domainUserId, { participantId });
     return { success: true };
   }
@@ -982,7 +967,7 @@ export class RoomsService {
     if (room.status !== 'ACTIVE') {
       throw new BadRequestException(`Room is ${room.status}. Mic control requires ACTIVE room.`);
     }
-    if (!room.janusAudioRoomId) {
+    if (!room.audioRoomId) {
       throw new BadRequestException('Room has no AudioBridge provisioned.');
     }
     return { room, janus: this.media };
@@ -1003,7 +988,7 @@ export class RoomsService {
     if (room.status !== 'ACTIVE') {
       throw new BadRequestException(`Room is ${room.status}. Video control requires ACTIVE room.`);
     }
-    if (!room.janusVideoRoomId) {
+    if (!room.videoRoomId) {
       throw new BadRequestException('Room has no VideoRoom provisioned.');
     }
     return { room, janus: this.media };

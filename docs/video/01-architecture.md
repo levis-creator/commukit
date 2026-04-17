@@ -2,6 +2,35 @@
 
 ## Stack Overview
 
+The communications-service abstracts video behind a pluggable `MediaProvider`
+interface. Two providers are shipped: **LiveKit** (default) and **Janus** (opt-in fallback).
+
+### With LiveKit (default)
+
+```
+┌──────────────┐   internal JWT    ┌────────────────────────┐
+│ Consumer app │ ────────────────▶ │ communications-service │
+│  backend     │                   │  (owns LiveKit & Matrix)│
+└──────────────┘                   └───────────┬────────────┘
+       │                                       │ Twirp RPC API
+       │ returns session (token)               │
+       ▼                                       ▼
+┌──────────────┐   direct WebSocket ┌────────────────────────┐
+│  Client app  │ ─────────────────▶ │   LiveKit Server       │
+│              │   (token auth,     │   (SFU, adaptive       │
+│              │    publish/sub)    │    bitrate, TURN)      │
+└──────────────┘                    └────────────────────────┘
+```
+
+- **LiveKit Server** runs as an SFU with adaptive bitrate and simulcast.
+  Participants connect with a JWT token minted by the comms service.
+- **communications-service** talks to LiveKit via Twirp RPC API.
+- **Client app** receives a token + LiveKit URL and connects directly
+  using `livekit-client` (Web) or `livekit_client` (Flutter).
+- LiveKit has **built-in TURN** — no separate coturn needed.
+
+### With Janus (opt-in fallback)
+
 ```
 ┌──────────────┐   internal JWT    ┌────────────────────────┐
 │ Consumer app │ ────────────────▶ │ communications-service │
@@ -22,22 +51,9 @@
                     └─────────────┘
 ```
 
-- **Janus Gateway** runs the VideoRoom plugin as an SFU (Selective
-  Forwarding Unit). Every publisher sends one upstream; Janus forwards
-  each track to every subscriber. Bandwidth scales linearly with
-  participants, not quadratically.
-- **communications-service** is the only component that talks to Janus's
-  admin HTTP API. It creates rooms, looks up participants, and issues
-  moderation commands.
-- **Consumer backend** (your app) never sees Janus. It asks comms for a
-  session on behalf of a domain user and receives the coordinates needed
-  to connect.
-- **Client app** receives VideoRoom id + Janus WebSocket URL + ICE servers
-  and connects to Janus directly using any Janus client SDK
-  (janus-gateway.js, janus_client Dart, custom, etc.).
-- **coturn** provides TURN/STUN relay for clients behind NAT or
-  restrictive firewalls. TURN credentials are pushed to the client inside
-  the session response's `iceServers` array.
+- **Janus Gateway** runs the VideoRoom plugin as an SFU. Every publisher
+  sends one upstream; Janus forwards each track to every subscriber.
+- **coturn** provides TURN/STUN relay for clients behind NAT.
 
 ## Why SFU (not mesh, not MCU)
 
@@ -60,7 +76,7 @@ Comms-service owns four tables (shared with chat — see
 | Table | Video-relevant fields |
 |-------|---|
 | `communication_users` | `domainUserId`, `displayName` — used to tag Janus participants so moderation can resolve domain users to Janus participant IDs. |
-| `communication_rooms` | `mode` (IN_PERSON/HYBRID/REMOTE), `janusAudioRoomId`, `janusVideoRoomId`, `status`. |
+| `communication_rooms` | `mode` (IN_PERSON/HYBRID/REMOTE), `audioRoomId`, `videoRoomId`, `status`. |
 | `communication_memberships` | Which users are authorized. `leftAt` marks invalidated sessions so kicked users can't rejoin. |
 | `communication_audit_logs` | Every `USER_AUTHORIZED`, `PARTICIPANT_KICKED_VIDEO`, `PARTICIPANT_KICKED_AUDIO`, `MIC_MUTED`, etc. |
 

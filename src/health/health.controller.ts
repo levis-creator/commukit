@@ -21,9 +21,9 @@ import type { SipProvider } from '../providers/sip-provider.interface';
  * `"unreachable"` (or `"unregistered"` for SIP); fully working returns
  * `"connected"` (or `"registered"` for SIP).
  *
- * Response field names (`matrix`, `janus`) remain for backwards compatibility
- * with existing probes. These reflect the provider identifier, not the
- * concrete implementation class.
+ * The `media` field reports connectivity for whichever media provider is
+ * active (LiveKit or Janus). The legacy `janus` alias is kept temporarily
+ * for backwards compatibility with existing probes.
  */
 @ApiTags('Health')
 @Controller('health')
@@ -55,19 +55,23 @@ export class HealthController {
     summary: 'Health check',
     description:
       'Returns the connectivity state of each capability transport. ' +
-      'Inspect the `matrix`, `janus`, and `sip` fields to determine which ' +
+      'Inspect the `matrix`, `media`, and `sip` fields to determine which ' +
       'transports are currently reachable. The overall `status` is always "ok".',
   })
   @ApiResponse({
     status: 200,
     description:
-      'Health status. Example: `{ status: "ok", matrix: "connected", janus: "disabled", sip: "disabled" }`.',
+      'Health status. Example: `{ status: "ok", matrix: "connected", media: "connected", sip: "disabled" }`.',
   })
   check() {
+    const mediaState = this.mediaStatus();
     return {
       status: 'ok',
       matrix: this.matrixStatus(),
-      janus: this.janusStatus(),
+      media: mediaState,
+      mediaProvider: this.media?.id ?? null,
+      // Legacy alias — remove once all probes are updated.
+      janus: mediaState,
       sip: this.sipStatus(),
     };
   }
@@ -77,7 +81,7 @@ export class HealthController {
     return this.chat.isAvailable() ? 'connected' : 'unreachable';
   }
 
-  private janusStatus(): 'connected' | 'unreachable' | 'disabled' {
+  private mediaStatus(): 'connected' | 'unreachable' | 'disabled' {
     if (!this.media) return 'disabled';
     return this.media.isAvailable() ? 'connected' : 'unreachable';
   }

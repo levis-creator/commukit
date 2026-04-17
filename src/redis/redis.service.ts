@@ -26,6 +26,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const password = process.env.REDIS_PASSWORD ?? '';
     const db = Number(process.env.REDIS_DB ?? '0');
 
+    if (!password && process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'REDIS_PASSWORD must be set in production — refusing to start without it.',
+      );
+    }
+
     this.client = new Redis({
       host,
       port,

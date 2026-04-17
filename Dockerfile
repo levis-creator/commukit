@@ -24,6 +24,9 @@ COPY entrypoint.sh ./entrypoint.sh
 
 RUN chmod +x ./entrypoint.sh
 
+RUN addgroup -g 1001 appgroup && adduser -u 1001 -G appgroup -s /bin/sh -D appuser
+USER appuser
+
 EXPOSE 3014
 
 ENTRYPOINT ["./entrypoint.sh"]

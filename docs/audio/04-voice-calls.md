@@ -1,47 +1,53 @@
 # 04 — Voice Calls (1:1 and Small Group)
 
 Comms-service has no dedicated "voice call" primitive. A voice call is
-just an `IN_PERSON` room (AudioBridge mixer) with the right number of
-users authorized. This mirrors the video 1:1 pattern — the server stays
-simple and your app owns the call UX.
+just an `IN_PERSON` room with the right number of users authorized.
+This mirrors the video 1:1 pattern — the server stays simple and your
+app owns the call UX.
+
+The media provider (LiveKit or Janus) is abstracted by the comms
+service. Both providers support `IN_PERSON` mode for voice calls — the
+only difference is how clients connect after receiving session
+credentials.
 
 ---
 
 ## The Model
 
 ```
-┌─────────┐              ┌──────────────────────┐              ┌─────────┐
-│ Alice   │ ──────────▶  │ communications-service │ ◀───────── │ Bob     │
-│ (caller)│   authorize  │   IN_PERSON room, cap 2│  authorize │ (callee)│
-└────┬────┘              └──────────┬───────────┘              └────┬────┘
-     │                              │                               │
-     │ Janus WS (audiobridge)       │                               │ Janus WS
-     └──────────────────────────────┴───────────────────────────────┘
-                 via Janus AudioBridge mixer
+                              +------------------------+
++--------+   authorize-user   | communications-service |   authorize-user   +--------+
+| Alice  | -----------------> |   IN_PERSON room       | <----------------- | Bob    |
+| (caller|                    +----------+-------------+                    |(callee)|
++---+----+                               |                                  +---+----+
+    |                                     |                                      |
+    |   connect (LiveKit token or         |                                      |
+    |    Janus WS audiobridge)            |                                      |
+    +-------------------------------------+--------------------------------------+
+                      via media provider (audio mixer)
 ```
 
-- One Janus AudioBridge room per call, keyed by a `contextId` your app
+- One audio room per call, keyed by a `contextId` your app
   chooses (e.g. a call uuid or `voice:<alice>:<bob>:<timestamp>`).
 - Both participants get the same room coordinates from
-  `authorize-user` and connect to Janus directly.
-- Janus mixes Alice and Bob into a single Opus stream and sends the
-  mix back to each of them. Each client has one peer connection.
+  `authorize-user` and connect to the media provider directly.
+- The provider mixes audio and sends the mix back to each
+  participant. Each client has one connection.
 - Small groups work the same way — just authorize more users.
 
-## Why AudioBridge Instead of VideoRoom for Voice Calls
+## Why AudioBridge / IN_PERSON Mode for Voice Calls
 
-| Concern | AudioBridge (IN_PERSON) | VideoRoom audio-only (REMOTE) |
+| Concern | IN_PERSON (AudioBridge / LiveKit audio) | REMOTE (VideoRoom / LiveKit video) |
 |---|---|---|
-| Server-enforced mute | ✅ | ❌ client-side only |
-| Bandwidth to client | Flat — one mixed stream | Per-participant streams |
+| Server-enforced mute | Yes | Depends on provider |
+| Bandwidth to client | Flat — one mixed stream (Janus) / optimized tracks (LiveKit) | Per-participant streams |
 | Recording | One mixed file | Per-participant files |
-| Spatial audio | Harder | Natural |
 | Good for | Voice calls, phone-style UX, broadcast | Video calls with optional video off |
 
-Voice calls go through AudioBridge. If the user later turns on a
-camera, you've made a product decision — either (a) live with
-client-side mute and use `REMOTE` from the start, or (b) keep voice in
-AudioBridge and build a separate flow for video escalation.
+Voice calls go through `IN_PERSON` mode. If the user later turns on a
+camera, you've made a product decision — either (a) use `REMOTE` from
+the start, or (b) keep voice in `IN_PERSON` and build a separate flow
+for video escalation.
 
 ## Signalling: Ringing
 
@@ -141,9 +147,10 @@ router.get('/voice-calls/:id/communications-session', requireAuth, async (req, r
 });
 ```
 
-Both clients then use the AudioBridge connect flow from
-[03-integration.md Step 7](03-integration.md#step-7--wire-the-client-browser--janus-web-sdk)
-unchanged.
+Both clients then use the provider-specific connect flow from
+[03-integration.md Step 7](03-integration.md#step-7--wire-the-client)
+unchanged. Switch on `audioBridge.credentials.provider` to pick the
+right SDK.
 
 ### 4. Decline / hangup / timeout
 
@@ -192,9 +199,8 @@ Same flow, more authorized users. Two real considerations:
   participant as they join. Or pre-authorize everyone and let them
   connect whenever — comms is idempotent, so re-running
   `authorize-user` is safe.
-- **Participant cap.** Janus AudioBridge scales to dozens of
-  participants on modest hardware because mixing cost is linear in the
-  number of active speakers, not total participants. For hundreds, see
+- **Participant cap.** Both providers handle dozens of participants
+  well. For hundreds, see
   [07-troubleshooting.md](07-troubleshooting.md#scaling).
 
 ---
@@ -206,7 +212,7 @@ Same flow, more authorized users. Two real considerations:
 | **Pre-flight mic check** | Let the client open the mic stream before `POST /voice-calls` so the user isn't greeted with a permission prompt after the callee picks up. |
 | **Ringtone / ringback** | Play locally on each client. Comms doesn't generate tones. |
 | **Busy / Do Not Disturb** | Check in your ringing layer before calling `provisionRoom`. If the callee is busy, transition to `MISSED` without provisioning. |
-| **Reconnection** | If a participant drops, re-`GET /communications-session`. Same coordinates come back while the room is `ACTIVE`. |
+| **Reconnection** | If a participant drops, re-`GET /communications-session`. Same coordinates come back while the room is `ACTIVE`. LiveKit tokens may need to be refreshed if expired (15-min TTL). |
 | **Call history** | Persist `voiceCall` rows in your DB. Your `status` + timestamps become the history. |
 | **Hold / resume** | Client-side local mute + display the "on hold" label. No server support needed. |
 | **Missed calls** | Subscribe to `communications.room.closed` events; if your DB still shows `RINGING` for that `contextId`, mark `MISSED` and push a notification. |

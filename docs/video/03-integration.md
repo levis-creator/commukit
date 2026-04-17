@@ -2,10 +2,8 @@
 
 How to wire a consumer app to group video, with runnable examples at each
 step. Backend examples use **Express.js** (plain JavaScript, Node 18+).
-Translate trivially to any HTTP framework. Client examples use
-JavaScript (browser) because the Janus web SDK is the most widely
-deployed — the flow is identical in Dart/Flutter/native with their
-respective Janus clients.
+Translate trivially to any HTTP framework. Client examples show both
+LiveKit and Janus SDKs.
 
 For the 1:1 call variant, see [04-one-on-one-calls.md](04-one-on-one-calls.md).
 
@@ -14,12 +12,13 @@ For the 1:1 call variant, see [04-one-on-one-calls.md](04-one-on-one-calls.md).
 ## Prerequisites
 
 - comms-service deployed and reachable on the internal network
-- Janus Gateway running with the `videoroom` plugin enabled
-- coturn (or another TURN server) running, reachable from clients
+- A media provider running:
+  - **LiveKit (default):** LiveKit Server running, reachable from clients
+  - **Janus (opt-in):** Janus Gateway with the `videoroom` plugin enabled, plus coturn for TURN
 - Shared secrets in comms-service `.env`:
   - `INTERNAL_SERVICE_SECRET`
-  - `JANUS_HTTP_URL`, `JANUS_PUBLIC_WS_URL`
-  - `JANUS_ICE_SERVERS`, `JANUS_TURN_USERNAME`, `JANUS_TURN_CREDENTIAL`
+  - LiveKit: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`
+  - Janus: `JANUS_HTTP_URL`, `JANUS_PUBLIC_WS_URL`, `JANUS_ICE_SERVERS`, `JANUS_TURN_USERNAME`, `JANUS_TURN_CREDENTIAL`
 
 ---
 
@@ -230,17 +229,15 @@ router.get('/calls/:id/communications-session', requireAuth, async (req, res, ne
 
 ---
 
-## Step 7 — Wire the client (browser / Janus web SDK)
+## Step 7 — Wire the client
 
-Uses `janus-gateway.js`. The same shape translates to Dart (`janus_client`),
-iOS, Android, or Unity Janus clients.
+The session response includes `videoRoom.credentials.provider` so clients
+can branch on the active provider.
 
-```html
-<script src="https://cdn.jsdelivr.net/npm/janus-gateway@1.2.0/janus.js"></script>
-```
+### Provider-dispatch pattern
 
 ```js
-// callClient.js
+// callClient.js — provider-agnostic entry point
 async function joinCall(callId, me) {
   const res = await fetch(`/api/v1/calls/${callId}/communications-session`, {
     headers: { Authorization: `Bearer ${me.apiToken}` },
@@ -251,7 +248,92 @@ async function joinCall(callId, me) {
     throw new Error(session.videoRoom?.reason || 'Video unavailable');
   }
 
-  const { roomId, wsUrl, iceServers } = session.videoRoom;
+  const { credentials } = session.videoRoom;
+
+  switch (credentials.provider) {
+    case 'livekit':
+      return joinWithLiveKit(credentials);
+    case 'janus':
+      return joinWithJanus(credentials, me);
+    default:
+      throw new Error(`Unknown provider: ${credentials.provider}`);
+  }
+}
+```
+
+### With LiveKit (default) — Web
+
+Install: `npm install livekit-client`
+
+```js
+import { Room, RoomEvent } from 'livekit-client';
+
+async function joinWithLiveKit(credentials) {
+  const room = new Room({
+    adaptiveStream: true,
+    dynacast: true,
+  });
+
+  room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    const el = track.attach();
+    document.getElementById('remote-video').appendChild(el);
+  });
+
+  room.on(RoomEvent.TrackUnsubscribed, (track) => {
+    track.detach().forEach((el) => el.remove());
+  });
+
+  await room.connect(credentials.url, credentials.token);
+
+  // Publish local camera + mic
+  await room.localParticipant.enableCameraAndMicrophone();
+
+  return { room };
+}
+```
+
+### With LiveKit (default) — Flutter
+
+Add to `pubspec.yaml`: `livekit_client: ^2.0.0`
+
+```dart
+import 'package:livekit_client/livekit_client.dart';
+
+Future<Room> joinWithLiveKit(Map<String, dynamic> credentials) async {
+  final room = Room();
+
+  room.on<TrackSubscribedEvent>((event) {
+    // Attach remote track to your UI
+  });
+
+  await room.connect(
+    credentials['url'],
+    credentials['token'],
+    roomOptions: const RoomOptions(
+      adaptiveStream: true,
+      dynacast: true,
+    ),
+  );
+
+  await room.localParticipant?.setCameraEnabled(true);
+  await room.localParticipant?.setMicrophoneEnabled(true);
+
+  return room;
+}
+```
+
+### With Janus — Web
+
+Uses `janus-gateway.js`. The same shape translates to Dart (`janus_client`),
+iOS, Android, or Unity Janus clients.
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/janus-gateway@1.2.0/janus.js"></script>
+```
+
+```js
+async function joinWithJanus(credentials, me) {
+  const { roomId, wsUrl, iceServers } = credentials;
 
   await new Promise((r) => Janus.init({ debug: 'warn', callback: r }));
 
@@ -371,18 +453,19 @@ router.post('/calls/:id/end', requireAuth, async (req, res, next) => {
 });
 ```
 
-Client side, watch for Janus `hangup` / `detached` events and surface a
-"call ended" state.
+Client-side teardown depends on the provider:
+- **LiveKit:** Call `room.disconnect()`.
+- **Janus:** Watch for `hangup` / `detached` events; call `videoroom.detach()` and `janus.destroy()`.
 
 ---
 
 ## End-to-End Sequence
 
 ```
-Host creates call            ──▶ provisionRoom    (PROVISIONED)
-Host starts call             ──▶ activateRoom     (ACTIVE)
-Each participant joins       ──▶ authorizeUser    (returns videoRoom coords)
-Client opens Janus WS        ──▶ direct to Janus
-Host kicks bad actor         ──▶ kickVideo + invalidateSession
-Call ends                    ──▶ closeRoom        (Janus room destroyed)
+Host creates call            --> provisionRoom    (PROVISIONED)
+Host starts call             --> activateRoom     (ACTIVE)
+Each participant joins       --> authorizeUser    (returns videoRoom credentials)
+Client connects to provider  --> direct to LiveKit / Janus
+Host kicks bad actor         --> kickVideo + invalidateSession
+Call ends                    --> closeRoom        (media room destroyed)
 ```

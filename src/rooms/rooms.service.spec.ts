@@ -8,6 +8,7 @@ import { CHAT_PROVIDER, MEDIA_PROVIDER } from '../providers/tokens';
 import type { ChatProvider } from '../providers/chat-provider.interface';
 import type { MediaProvider } from '../providers/media-provider.interface';
 import { RoomMode } from './dto/provision-room.dto';
+import { CommunicationRole } from './dto/authorize-user.dto';
 
 describe('RoomsService', () => {
   let service: RoomsService;
@@ -25,8 +26,8 @@ describe('RoomsService', () => {
     mode: 'REMOTE',
     status: 'PROVISIONED',
     matrixRoomId: '!abc:parliament.local',
-    janusAudioRoomId: null,
-    janusVideoRoomId: 123456,
+    audioRoomId: null,
+    videoRoomId: 123456,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -88,7 +89,7 @@ describe('RoomsService', () => {
             id: 'janus',
             ensureAudioBridgeRoom: jest.fn(),
             ensureVideoRoom: jest.fn(),
-            destroyVideoRoom: jest.fn(),
+            destroyVideoRoom: jest.fn().mockResolvedValue(undefined),
             listParticipants: jest.fn(),
             listVideoParticipants: jest.fn(),
             muteParticipant: jest.fn(),
@@ -153,7 +154,7 @@ describe('RoomsService', () => {
         ...mockRoom,
         id: 'new-room',
         matrixRoomId: '!new:parliament.local',
-        janusVideoRoomId: 789,
+        videoRoomId: 789,
       });
 
       await service.provision(dto);
@@ -174,8 +175,8 @@ describe('RoomsService', () => {
       (prisma.communicationRoom.create as jest.Mock).mockResolvedValue({
         ...mockRoom,
         mode: 'IN_PERSON',
-        janusAudioRoomId: 456,
-        janusVideoRoomId: null,
+        audioRoomId: 456,
+        videoRoomId: null,
       });
 
       await service.provision({ ...dto, mode: RoomMode.IN_PERSON });
@@ -192,8 +193,8 @@ describe('RoomsService', () => {
       (prisma.communicationRoom.create as jest.Mock).mockResolvedValue({
         ...mockRoom,
         mode: 'HYBRID',
-        janusAudioRoomId: 111,
-        janusVideoRoomId: 222,
+        audioRoomId: 111,
+        videoRoomId: 222,
       });
 
       await service.provision({ ...dto, mode: RoomMode.HYBRID });
@@ -280,7 +281,7 @@ describe('RoomsService', () => {
       (prisma.communicationRoom.findUnique as jest.Mock).mockResolvedValue({
         ...mockRoom,
         status: 'ACTIVE',
-        janusVideoRoomId: 123456,
+        videoRoomId: 123456,
       });
       (prisma.communicationRoom.update as jest.Mock).mockResolvedValue({
         ...mockRoom,
@@ -312,7 +313,7 @@ describe('RoomsService', () => {
       contextType: 'SITTING',
       domainUserId: 'user-uuid-1',
       displayName: 'Hon. Kimani',
-      roles: ['MEMBER'],
+      roles: [CommunicationRole.PARTICIPANT],
     };
 
     const activeRoom = { ...mockRoom, status: 'ACTIVE' };
@@ -443,8 +444,8 @@ describe('RoomsService', () => {
       (prisma.communicationRoom.findUnique as jest.Mock).mockResolvedValue({
         ...activeRoom,
         mode: 'HYBRID',
-        janusAudioRoomId: 555,
-        janusVideoRoomId: 666,
+        audioRoomId: 555,
+        videoRoomId: 666,
       });
       (matrix.ensureUserToken as jest.Mock).mockResolvedValue({
         accessToken: 'syt_token',
@@ -463,8 +464,8 @@ describe('RoomsService', () => {
       (prisma.communicationRoom.findUnique as jest.Mock).mockResolvedValue({
         ...activeRoom,
         mode: 'HYBRID',
-        janusAudioRoomId: 555,
-        janusVideoRoomId: 666,
+        audioRoomId: 555,
+        videoRoomId: 666,
       });
       (matrix.ensureUserToken as jest.Mock).mockResolvedValue({
         accessToken: 'syt_token',
@@ -512,8 +513,8 @@ describe('RoomsService', () => {
       mode: 'HYBRID',
       status: 'ACTIVE',
       matrixRoomId: '!meeting:matrix.local',
-      janusAudioRoomId: 777,
-      janusVideoRoomId: 888,
+      audioRoomId: 777,
+      videoRoomId: 888,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

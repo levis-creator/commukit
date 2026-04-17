@@ -21,9 +21,9 @@ const isEnabled = (key: string, fallback: 'true' | 'false'): boolean =>
   ((process.env[key] ?? fallback).trim().toLowerCase() === 'true');
 
 const matrixEnabled = isEnabled('MATRIX_ENABLED', 'true');
-const janusEnabled = isEnabled('JANUS_ENABLED', 'true');
+const janusEnabled = isEnabled('JANUS_ENABLED', 'false');
 const sipEnabled = isEnabled('SIP_ENABLED', 'false');
-const mediaProvider = (process.env.MEDIA_PROVIDER ?? 'janus').trim().toLowerCase();
+const mediaProvider = (process.env.MEDIA_PROVIDER ?? 'livekit').trim().toLowerCase();
 const mediaImports =
   mediaProvider === 'livekit'
     ? [LivekitModule]
@@ -52,6 +52,6 @@ const mediaImports =
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
+    consumer.apply(RequestIdMiddleware).forRoutes('*path');
   }
 }

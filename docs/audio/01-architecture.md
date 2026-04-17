@@ -2,6 +2,36 @@
 
 ## Stack Overview
 
+The communications-service abstracts audio behind a pluggable `MediaProvider`
+interface. Two providers are shipped: **LiveKit** (default) and **Janus** (opt-in fallback).
+
+### With LiveKit (default)
+
+```
+┌──────────────┐   internal JWT    ┌────────────────────────┐
+│ Consumer app │ ────────────────▶ │ communications-service │
+│  backend     │                   │  (owns LiveKit & Matrix)│
+└──────────────┘                   └───────────┬────────────┘
+       │                                       │ Twirp RPC API
+       │ returns session (token)               │
+       ▼                                       ▼
+┌──────────────┐   direct WebSocket ┌────────────────────────┐
+│  Client app  │ ─────────────────▶ │   LiveKit Server       │
+│              │   (token auth)     │   (audio compositor)   │
+└──────────────┘                    └────────────────────────┘
+```
+
+- **LiveKit Server** handles audio mixing server-side. Participants
+  connect with a JWT token minted by the comms service.
+- **communications-service** talks to LiveKit via Twirp RPC API.
+  It creates rooms, manages participants, and issues moderation commands.
+- **Consumer backend** never sees LiveKit. It asks comms for a session.
+- **Client app** receives a token + LiveKit URL and connects directly.
+- LiveKit has **built-in TURN** — no separate coturn needed (though
+  external TURN can be configured via `LIVEKIT_ICE_SERVERS`).
+
+### With Janus (opt-in fallback)
+
 ```
 ┌──────────────┐   internal JWT    ┌────────────────────────┐
 │ Consumer app │ ────────────────▶ │ communications-service │
@@ -24,19 +54,8 @@
 
 - **Janus Gateway** runs the AudioBridge plugin as a server-side audio
   mixer. Every participant sends audio upstream; Janus mixes everyone
-  into a single Opus stream and sends the mix back. Each client has
-  exactly one peer connection.
-- **communications-service** is the only component that talks to
-  Janus's admin HTTP API. It creates rooms, looks up participants, and
-  issues moderation commands.
-- **Consumer backend** (your app) never sees Janus. It asks comms for a
-  session on behalf of a domain user and receives room coordinates.
-- **Client app** receives the AudioBridge room id + Janus WebSocket URL
-  and connects to Janus directly using any Janus client SDK.
-- **coturn** provides TURN/STUN relay for clients behind NAT. Same
-  credentials as video — comms returns the `iceServers` array for the
-  video side; audio-only clients can ignore it if their Janus SDK
-  handles ICE internally, or reuse it directly.
+  into a single Opus stream and sends the mix back.
+- **coturn** provides TURN/STUN relay for clients behind NAT.
 
 ## Why a Mixer (Not SFU) for Audio
 
@@ -85,7 +104,7 @@ Comms-service uses the same four tables as chat and video:
 | Table | Audio-relevant fields |
 |-------|---|
 | `communication_users` | `domainUserId`, `displayName` — used to tag AudioBridge participants so moderation can resolve domain users to Janus participant IDs. |
-| `communication_rooms` | `janusAudioRoomId`, `mode`, `status`. |
+| `communication_rooms` | `audioRoomId`, `mode`, `status`. |
 | `communication_memberships` | Which users are authorized. `leftAt` marks invalidated sessions. |
 | `communication_audit_logs` | Every `MIC_MUTED`, `MIC_UNMUTED`, `ROOM_MUTED`, `PARTICIPANT_KICKED_AUDIO`, etc. |
 

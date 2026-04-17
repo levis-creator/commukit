@@ -551,8 +551,13 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
     }
   }
 
+  /** HTTP request timeout for Janus admin API calls (ms). */
+  private readonly httpTimeoutMs = 10_000;
+
   private async httpGet(path: string): Promise<any> {
-    const res = await fetch(`${this.httpUrl}${path}`);
+    const res = await fetch(`${this.httpUrl}${path}`, {
+      signal: AbortSignal.timeout(this.httpTimeoutMs),
+    });
     if (!res.ok) throw new Error(`Janus HTTP ${res.status} on GET ${path}`);
     return res.json();
   }
@@ -562,13 +567,17 @@ export class JanusService implements MediaProvider, OnModuleInit, OnModuleDestro
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.httpTimeoutMs),
     });
     if (!res.ok) throw new Error(`Janus HTTP ${res.status} on POST ${path}`);
     return res.json();
   }
 
   private async httpDelete(path: string): Promise<void> {
-    await fetch(`${this.httpUrl}${path}`, { method: 'DELETE' });
+    await fetch(`${this.httpUrl}${path}`, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(this.httpTimeoutMs),
+    });
   }
 
   private tx(): string {

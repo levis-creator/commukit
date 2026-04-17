@@ -1,9 +1,9 @@
 # 03 — Integration Guide (Step-by-Step with Examples)
 
 How to wire a consumer app to group audio, with runnable examples at
-each step. Backend examples use **Express.js**; client examples use
-JavaScript + the Janus web SDK. Every shape translates directly to any
-HTTP framework or Janus client library (Dart, Swift, Kotlin, native).
+each step. Backend examples use **Express.js**; client examples cover
+both LiveKit and Janus SDKs. Every shape translates directly to any
+HTTP framework or client library (Dart, Swift, Kotlin, native).
 
 For the 1:1 voice call variant, see [04-voice-calls.md](04-voice-calls.md).
 
@@ -12,12 +12,15 @@ For the 1:1 voice call variant, see [04-voice-calls.md](04-voice-calls.md).
 ## Prerequisites
 
 - comms-service deployed and reachable on the internal network
-- Janus Gateway running with the `audiobridge` plugin enabled
+- A media provider running:
+  - **LiveKit (default):** LiveKit server with API key/secret configured
+  - **Janus (opt-in):** Janus Gateway with the `audiobridge` plugin enabled
 - coturn (or another TURN server) — required if your clients are on
   restrictive networks
 - Shared secrets in comms-service `.env`:
   - `INTERNAL_SERVICE_SECRET`
-  - `JANUS_HTTP_URL`, `JANUS_PUBLIC_WS_URL`
+  - LiveKit: `LIVEKIT_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_PUBLIC_URL`
+  - Janus: `JANUS_HTTP_URL`, `JANUS_PUBLIC_WS_URL`
 
 ---
 
@@ -222,25 +225,77 @@ router.get('/voice-rooms/:id/communications-session', requireAuth, async (req, r
 
 ---
 
-## Step 7 — Wire the client (browser / Janus web SDK)
+## Step 7 — Wire the client
+
+The client reads `audioBridge.credentials.provider` from the session
+response and connects using the matching SDK. Use a `switch` to handle
+both providers.
+
+### Provider dispatch pattern (JavaScript)
+
+```js
+async function joinAudio(session, me) {
+  if (session.audioBridge?.status !== 'available') {
+    throw new Error(session.audioBridge?.reason || 'Audio unavailable');
+  }
+
+  const { credentials } = session.audioBridge;
+
+  switch (credentials.provider) {
+    case 'livekit':
+      return joinWithLiveKit(credentials);
+    case 'janus':
+      return joinWithJanus(credentials, me);
+    default:
+      throw new Error(`Unknown audio provider: ${credentials.provider}`);
+  }
+}
+```
+
+### With LiveKit (default) — Web (`livekit-client` npm)
+
+```js
+import { Room, RoomEvent, Track } from 'livekit-client';
+
+async function joinWithLiveKit(credentials) {
+  const room = new Room();
+
+  room.on(RoomEvent.TrackSubscribed, (track) => {
+    if (track.kind === Track.Kind.Audio) {
+      const audioEl = track.attach();
+      document.body.appendChild(audioEl);
+    }
+  });
+
+  await room.connect(credentials.url, credentials.token);
+  await room.localParticipant.setMicrophoneEnabled(true);
+
+  return { room, leave: () => room.disconnect() };
+}
+```
+
+### With LiveKit — Flutter (`livekit_client` package)
+
+```dart
+import 'package:livekit_client/livekit_client.dart';
+
+Future<Room> joinWithLiveKit(Map<String, dynamic> credentials) async {
+  final room = Room();
+  await room.connect(credentials['url'], credentials['token']);
+  await room.localParticipant?.setMicrophoneEnabled(true);
+  return room;
+}
+```
+
+### With Janus — Web (`janus-gateway` SDK)
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/janus-gateway@1.2.0/janus.js"></script>
 ```
 
 ```js
-// voiceClient.js
-async function joinVoiceRoom(roomId, me) {
-  const res = await fetch(`/api/v1/voice-rooms/${roomId}/communications-session`, {
-    headers: { Authorization: `Bearer ${me.apiToken}` },
-  });
-  const session = await res.json();
-
-  if (session.audioBridge?.status !== 'available') {
-    throw new Error(session.audioBridge?.reason || 'Audio unavailable');
-  }
-
-  const { roomId: audioRoomId, wsUrl } = session.audioBridge;
+async function joinWithJanus(credentials, me) {
+  const { roomId: audioRoomId, wsUrl } = credentials;
 
   await new Promise((r) => Janus.init({ debug: 'warn', callback: r }));
 
@@ -262,7 +317,6 @@ async function joinVoiceRoom(roomId, me) {
 
       onmessage: async (msg, jsep) => {
         if (msg.audiobridge === 'joined') {
-          // Create audio-only SDP offer
           const offer = await new Promise((resolve, reject) => {
             audiobridge.createOffer({
               media: { audio: true, video: false },
@@ -279,7 +333,6 @@ async function joinVoiceRoom(roomId, me) {
       },
 
       onremotestream: (stream) => {
-        // The single mixed stream — attach to an <audio> element
         const audioEl = document.getElementById('mixed-audio');
         audioEl.srcObject = stream;
         audioEl.play();
@@ -298,19 +351,37 @@ async function joinVoiceRoom(roomId, me) {
     },
   });
 
-  return { janus, audiobridge, audioRoomId };
+  return {
+    janus, audiobridge, audioRoomId,
+    leave: () => {
+      audiobridge.send({ message: { request: 'leave' } });
+      audiobridge.detach();
+      janus.destroy();
+    },
+  };
 }
+```
 
-// Local (client-initiated) mute — not server-enforced.
-// For server-enforced mute use the backend moderation endpoint.
-function setLocalMute(audiobridge, muted) {
-  audiobridge.send({ message: { request: 'configure', muted } });
-}
+### Provider dispatch pattern (Flutter / Dart)
 
-function leave(janus, audiobridge) {
-  audiobridge.send({ message: { request: 'leave' } });
-  audiobridge.detach();
-  janus.destroy();
+```dart
+Future<void> joinAudio(Map<String, dynamic> session, User me) async {
+  final audioBridge = session['audioBridge'];
+  if (audioBridge?['status'] != 'available') {
+    throw Exception(audioBridge?['reason'] ?? 'Audio unavailable');
+  }
+
+  final credentials = audioBridge['credentials'];
+  switch (credentials['provider']) {
+    case 'livekit':
+      await joinWithLiveKit(credentials);
+      break;
+    case 'janus':
+      await joinWithJanus(credentials, me);
+      break;
+    default:
+      throw Exception('Unknown provider: ${credentials['provider']}');
+  }
 }
 ```
 
@@ -371,10 +442,10 @@ router.post('/voice-rooms/:id/close', requireAuth, async (req, res, next) => {
 ## End-to-End Sequence
 
 ```
-Host creates voice room      ──▶ provisionRoom    (PROVISIONED)
-Host opens room              ──▶ activateRoom     (ACTIVE)
-Each user joins              ──▶ authorizeUser    (returns audioBridge coords)
-Client opens Janus WS        ──▶ direct to Janus  (single handle, mixed stream)
-Host mutes a disruptor       ──▶ muteUser         (server-enforced)
-Room closes                  ──▶ closeRoom        (Janus room destroyed)
+Host creates voice room      --> provisionRoom    (PROVISIONED)
+Host opens room              --> activateRoom     (ACTIVE)
+Each user joins              --> authorizeUser    (returns audioBridge credentials)
+Client connects to provider  --> direct to LiveKit or Janus
+Host mutes a disruptor       --> muteUser         (server-enforced)
+Room closes                  --> closeRoom        (provider room destroyed)
 ```

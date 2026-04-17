@@ -77,8 +77,8 @@ model CommunicationRoom {
   mode             String   @map("sittingMode")
   status           String   @default("PROVISIONED") // PROVISIONED, ACTIVE, CLOSED, ARCHIVED
   matrixRoomId     String?
-  janusAudioRoomId Int?
-  janusVideoRoomId Int?
+  audioRoomId      Int?     @map("janusAudioRoomId")
+  videoRoomId      Int?     @map("janusVideoRoomId")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

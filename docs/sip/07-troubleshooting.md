@@ -8,7 +8,7 @@
 | `/health` → `sip: "unregistered"` | Kamailio or Janus isn't reachable, or `SIP_BRIDGE_PASSWORD` is blank. Check `docker compose logs comms-service` for the init retry loop. |
 | `/users/sip-credentials` → 503 | Same as above — either SIP is disabled or credentials provisioning failed. Check response body for the `reason` field. |
 | Session response `sip.status: "unavailable"` with `reason: "SIP disabled"` | Module not loaded — flip `SIP_ENABLED=true` and restart. |
-| Session response `sip: null` for an `IN_PERSON` or `HYBRID` room | The room wasn't provisioned with an AudioBridge. Check `communication_rooms.janusAudioRoomId`. |
+| Session response `sip: null` for an `IN_PERSON` or `HYBRID` room | The room wasn't provisioned with an AudioBridge. Check `communication_rooms.audioRoomId`. |
 | Session response `sip: null` for a `REMOTE` or `CHAT` room | Expected — these room modes have no AudioBridge, so SIP doesn't apply. |
 | Softphone "Registration failed / 401 Unauthorized" | Wrong username or password. Copy them again exactly — SIP DIGEST is case-sensitive. |
 | Softphone "Registration failed / 403 Forbidden" | `subscriber` row missing from Kamailio DB. Re-call `POST /users/sip-credentials` to reprovision. |

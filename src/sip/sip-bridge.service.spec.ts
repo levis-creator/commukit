@@ -411,7 +411,7 @@ describe('SipBridgeService', () => {
         contextType: 'MEETING',
         contextId: 'ctx-1',
         status: 'PROVISIONED',
-        janusAudioRoomId: 1234,
+        audioRoomId: 1234,
       });
       await (service as any).onSipPluginEvent(makeIncoming('ctx-1'));
       expect(
@@ -432,7 +432,7 @@ describe('SipBridgeService', () => {
         contextType: 'MEETING',
         contextId: 'ctx-1',
         status: 'ACTIVE',
-        janusAudioRoomId: 1234,
+        audioRoomId: 1234,
       });
       prisma.communicationMembership.findUnique.mockResolvedValue(null);
       await (service as any).onSipPluginEvent(makeIncoming('ctx-1'));
@@ -454,7 +454,7 @@ describe('SipBridgeService', () => {
         contextType: 'MEETING',
         contextId: 'ctx-1',
         status: 'ACTIVE',
-        janusAudioRoomId: 1234,
+        audioRoomId: 1234,
       });
       prisma.communicationMembership.findUnique.mockResolvedValue({
         id: 'm1',
@@ -479,7 +479,7 @@ describe('SipBridgeService', () => {
         contextType: 'MEETING',
         contextId: 'ctx-1',
         status: 'ACTIVE',
-        janusAudioRoomId: 1234,
+        audioRoomId: 1234,
       });
       prisma.communicationMembership.findUnique.mockResolvedValue({
         id: 'm1',

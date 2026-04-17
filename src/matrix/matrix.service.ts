@@ -198,7 +198,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     const appHash = createHmac('sha256', 'comms-room-alias')
       .update(appId)
       .digest('hex')
-      .slice(0, 4);
+      .slice(0, 12);
     const contextPart = contextId.replace(/-/g, '').slice(0, 16).toLowerCase();
     return `comms-${appHash}-${contextPart}`;
   }
@@ -349,9 +349,19 @@ export class MatrixService implements ChatProvider, OnModuleInit {
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
       { user_id: matrixUserId },
       { asBot: true },
-    ).catch((err: unknown) =>
-      this.logger.warn(`Matrix invite failed for ${matrixUserId}: ${err}`),
-    );
+    ).catch((err: unknown) => {
+      // "already in the room" is expected when the Redis dedup flag has expired
+      // but the user never left — not worth a WARN.
+      if (
+        err instanceof MatrixHttpError &&
+        err.status === 403 &&
+        err.message.includes('is already in the room')
+      ) {
+        this.logger.debug(`Invite skipped (already in room): ${matrixUserId}`);
+      } else {
+        this.logger.warn(`Matrix invite failed for ${matrixUserId}: ${err}`);
+      }
+    });
 
     const joinPromise = this.httpPost(
       `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,

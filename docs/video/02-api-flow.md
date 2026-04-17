@@ -23,8 +23,9 @@ POST /internal/v1/rooms/provision
 ```
 
 For video you'll typically use `REMOTE` (video-only) or `HYBRID`
-(audio + video). Comms creates the Janus VideoRoom, stores the row, and
-publishes `communications.room.provisioned`. Idempotent.
+(audio + video). Comms creates the media room via the configured provider
+(LiveKit or Janus), stores the row, and publishes
+`communications.room.provisioned`. Idempotent.
 
 ## 2. Activate when the call begins
 
@@ -50,7 +51,10 @@ POST /internal/v1/rooms/:contextId/authorize-user
 }
 ```
 
-Returns the **session response**:
+Returns the **session response**. The shape of `videoRoom.credentials`
+depends on the active media provider.
+
+### With LiveKit (default)
 
 ```json
 {
@@ -60,16 +64,44 @@ Returns the **session response**:
   "audioBridge": null,
   "videoRoom": {
     "status": "available",
-    "roomId": 12345,
-    "wsUrl": "wss://janus.example.com/ws",
-    "iceServers": [
-      { "urls": ["stun:stun.example.com:3478"] },
-      {
-        "urls": ["turn:turn.example.com:3478?transport=udp"],
-        "username": "u1",
-        "credential": "p1"
-      }
-    ]
+    "credentials": {
+      "provider": "livekit",
+      "room": "comms-a1b2c3d4",
+      "url": "wss://livekit.example.com",
+      "token": "<jwt-participant-token>",
+      "iceServers": []
+    }
+  },
+  "modeImmutable": true
+}
+```
+
+LiveKit has built-in TURN so `iceServers` is typically empty — the
+client SDK handles connectivity automatically.
+
+### With Janus
+
+```json
+{
+  "roomId": "<comms-room-uuid>",
+  "status": "ACTIVE",
+  "chat": { "status": "available", "...": "..." },
+  "audioBridge": null,
+  "videoRoom": {
+    "status": "available",
+    "credentials": {
+      "provider": "janus",
+      "roomId": 12345,
+      "wsUrl": "wss://janus.example.com/ws",
+      "iceServers": [
+        { "urls": ["stun:stun.example.com:3478"] },
+        {
+          "urls": ["turn:turn.example.com:3478?transport=udp"],
+          "username": "u1",
+          "credential": "p1"
+        }
+      ]
+    }
   },
   "modeImmutable": true
 }
@@ -77,24 +109,41 @@ Returns the **session response**:
 
 Fields you care about for video:
 
-| Field | Meaning |
-|---|---|
-| `videoRoom.status` | `"available"` or `"unavailable"` — always branch on this |
-| `videoRoom.roomId` | Integer Janus VideoRoom id — pass to `join` request |
-| `videoRoom.wsUrl` | Janus WebSocket URL — open a Janus session here |
-| `videoRoom.iceServers` | Pass directly to `RTCPeerConnection` |
+| Field | LiveKit | Janus |
+|---|---|---|
+| `videoRoom.status` | `"available"` or `"unavailable"` — always branch on this | Same |
+| `videoRoom.credentials.provider` | `"livekit"` | `"janus"` |
+| `videoRoom.credentials.room` | Room name (string, e.g. `comms-a1b2c3d4`) | N/A |
+| `videoRoom.credentials.url` | LiveKit server URL | N/A |
+| `videoRoom.credentials.token` | JWT participant token (15-min expiry) | N/A |
+| `videoRoom.credentials.roomId` | N/A | Integer Janus VideoRoom id |
+| `videoRoom.credentials.wsUrl` | N/A | Janus WebSocket URL |
+| `videoRoom.credentials.iceServers` | Usually empty (built-in TURN) | Pass to `RTCPeerConnection` |
 
-When Janus is unreachable, `videoRoom` comes back as
+When the media provider is unreachable, `videoRoom` comes back as
 `{ "status": "unavailable", "reason": "..." }` and the client should
 show a "video unavailable" UI rather than crash.
 
-## 4. Client connects to Janus directly
+## 4. Client connects to the media provider directly
 
-The client never calls comms again during the session. It:
+The client never calls comms again during the session. Connection differs
+by provider.
 
-1. Opens a WebSocket to `videoRoom.wsUrl`
+### With LiveKit (default)
+
+1. Use the LiveKit client SDK (`livekit_client` for Flutter, `livekit-client` for web)
+2. Call `Room.connect(credentials.url, credentials.token)`
+3. Publish local audio/video tracks
+4. Subscribe to remote tracks via SDK event handlers
+
+Participant identity is embedded in the JWT token metadata — no display
+name convention needed.
+
+### With Janus
+
+1. Opens a WebSocket to `credentials.wsUrl`
 2. Creates a Janus session, attaches to the `janus.plugin.videoroom` plugin
-3. Joins `videoRoom.roomId` as a **publisher** with display name
+3. Joins `credentials.roomId` as a **publisher** with display name
    `DisplayName|domainUserId` (see [05-moderation.md](05-moderation.md))
 4. Creates an SDP offer, configures `iceServers`, publishes audio + video
 5. Subscribes to every other publisher the `joined` event lists, and to
@@ -130,7 +179,7 @@ locally — if you need server-enforced muting for `REMOTE` rooms, use
 POST /internal/v1/rooms/:contextId/close
 ```
 
-Comms destroys the Janus VideoRoom (best-effort) and publishes
+Comms destroys the media room (best-effort) and publishes
 `communications.room.closed`. Cached sessions are invalidated.
 
 ## RabbitMQ Events Emitted

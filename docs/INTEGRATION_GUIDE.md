@@ -8,7 +8,23 @@ This guide documents how any backend/app can integrate with the `vps-ke-communic
 
 - Network access to the communications-service (same Docker network or public URL)
 - A shared `INTERNAL_SERVICE_SECRET` env var (same value configured in communications-service)
-- Matrix Synapse and Janus Gateway reachable from the communications-service (not from your app)
+- Matrix Synapse reachable from the communications-service (not from your app)
+- LiveKit server (default) or Janus Gateway (opt-in fallback) reachable from the communications-service
+
+---
+
+## Choosing a media provider
+
+The communications-service supports two media backends. The operator picks one via the `MEDIA_PROVIDER` env var. Your integration code doesn't change — the session response tells clients which provider is active via the `credentials.provider` field.
+
+| Provider | Default? | Auth model | Best for |
+|---|---|---|---|
+| **LiveKit** | Yes | Token-based (JWT minted by comms-service) | New deployments, modern clients, built-in TURN |
+| **Janus** | No (opt-in) | No client tokens — clients connect via WebSocket | Existing Janus deployments, full SIP bridge support |
+
+Both providers expose identical API endpoints. The only difference is the credential shape in the session response.
+
+See [`PROVIDERS.md`](./PROVIDERS.md) for detailed documentation on each provider, or the standalone guides at [`docs/providers/LIVEKIT.md`](./providers/LIVEKIT.md) and [`docs/providers/JANUS.md`](./providers/JANUS.md).
 
 ---
 
@@ -65,12 +81,14 @@ This is **idempotent** — calling again with the same `appId + contextType + co
 
 ### Room modes
 
-| Mode | Chat (Matrix) | AudioBridge (Janus) | VideoRoom (Janus) | Typical use |
+| Mode | Chat (Matrix) | AudioBridge | VideoRoom | Typical use |
 |------|:---:|:---:|:---:|---|
 | `IN_PERSON` | Yes | Yes | No | Physical meeting room with audio mixing |
 | `HYBRID` | Yes | Yes | Yes | Mixed in-person + remote participants |
 | `REMOTE` | Yes | No | Yes | Fully remote video session |
 | `CHAT` | Yes | No | No | 1-to-1 DMs, text-only channels |
+
+Room modes work identically regardless of which media provider is active (LiveKit or Janus). The comms service abstracts the backend.
 
 > Room mode is **immutable** — provision a new room if the mode needs to change.
 
@@ -94,7 +112,7 @@ Content-Type: application/json
 { "appId": "your-app-id", "contextType": "MEETING" }
 ```
 
-**State machine:** `PROVISIONED` → `ACTIVE` → `CLOSED`
+**State machine:** `PROVISIONED` -> `ACTIVE` -> `CLOSED`
 
 - Only `ACTIVE` rooms accept new user authorizations.
 - `CLOSED` rooms are read-only — existing Matrix tokens retain read access until they expire.
@@ -123,11 +141,43 @@ X-Comms-API-Version: 2
 ```
 
 Set the `X-Comms-API-Version: 2` header to receive the **v2 response shape**
-described below, in which each capability exposes a provider-tagged
-`credentials` discriminated-union instead of the legacy flat fields. Omit
-the header to receive the v1 shape (deprecated but still supported).
+described below. Omit the header to receive the v1 shape (deprecated but still supported).
 
-**v2 response:**
+### v2 response — With LiveKit (default)
+
+```json
+{
+  "roomId": "<comms-room-uuid>",
+  "status": "ACTIVE",
+  "chat": {
+    "status": "available",
+    "credentials": {
+      "provider": "matrix",
+      "roomId": "!xyz:your-domain.local",
+      "accessToken": "syt_...",
+      "serverUrl": "http://matrix-host:8020",
+      "serverName": "your-domain.local"
+    }
+  },
+  "audioBridge": null,
+  "videoRoom": {
+    "status": "available",
+    "credentials": {
+      "provider": "livekit",
+      "room": "comms-789012",
+      "url": "wss://livekit.example.org",
+      "token": "eyJhbGciOiJIUzI1NiJ9...",
+      "iceServers": [
+        { "urls": ["stun:stun.l.google.com:19302"] }
+      ]
+    }
+  },
+  "modeImmutable": true
+}
+```
+
+### v2 response — With Janus
+
 ```json
 {
   "roomId": "<comms-room-uuid>",
@@ -159,11 +209,7 @@ the header to receive the v1 shape (deprecated but still supported).
 }
 ```
 
-Clients should **switch on `credentials.provider`** to pick the correct
-transport. Today only `matrix` (chat) and `janus` (audio/video) are
-emitted. When a LiveKit adapter ships, the audio/video credentials may
-carry `provider: "livekit"` with a different field set (`room`, `url`,
-`token`) — see [`PROVIDERS.md`](./PROVIDERS.md).
+Clients should **switch on `credentials.provider`** to pick the correct transport.
 
 Each capability has its own `status` field. If the chat provider is down,
 `chat.status` will be `"unavailable"` with a `reason`, but `videoRoom` may
@@ -205,6 +251,8 @@ This endpoint:
 
 ## Step 7: Consume the session in your client app
 
+Clients must switch on `credentials.provider` to pick the right transport. Both LiveKit and Janus examples are shown below.
+
 ### Flutter example
 
 ```dart
@@ -213,30 +261,42 @@ final session = await yourDataSource.getCommunicationsSession(meetingId);
 
 // 2. Initialize chat (if available)
 if (session.chat?.status == 'available') {
-  matrixService.connectWithToken(
-    session.chat!.serverUrl!,
-    session.chat!.accessToken!,
-  );
-  await matrixService.joinRoom(session.chat!.roomId!);
+  final chatCreds = session.chat!.credentials;
+  matrixService.connectWithToken(chatCreds.serverUrl, chatCreds.accessToken);
+  await matrixService.joinRoom(chatCreds.roomId);
   matrixService.startSync();
 }
 
 // 3. Initialize video call (if available)
 if (session.videoRoom?.status == 'available') {
-  await janusVideoService.joinRoom(
-    session.videoRoom!.roomId!,
-    session.videoRoom!.wsUrl!,
-    displayName,
-  );
+  final videoCreds = session.videoRoom!.credentials;
+  switch (videoCreds.provider) {
+    case 'livekit':
+      // LiveKit: connect with token
+      await livekitVideoService.connect(videoCreds.url, videoCreds.token);
+    case 'janus':
+      // Janus: connect via WebSocket with display name convention
+      await janusVideoService.joinRoom(
+        videoCreds.roomId,
+        videoCreds.wsUrl,
+        '$displayName|$domainUserId',
+      );
+  }
 }
 
 // 4. Initialize audio (if available)
 if (session.audioBridge?.status == 'available') {
-  await janusAudioService.joinRoom(
-    session.audioBridge!.roomId!,
-    session.audioBridge!.wsUrl!,
-    displayName,
-  );
+  final audioCreds = session.audioBridge!.credentials;
+  switch (audioCreds.provider) {
+    case 'livekit':
+      await livekitAudioService.connect(audioCreds.url, audioCreds.token);
+    case 'janus':
+      await janusAudioService.joinRoom(
+        audioCreds.roomId,
+        audioCreds.wsUrl,
+        '$displayName|$domainUserId',
+      );
+  }
 }
 ```
 
@@ -249,21 +309,32 @@ const session = await fetch('/your-api/meetings/123/communications-session', {
 
 // Chat via Matrix JS SDK
 if (session.chat?.status === 'available') {
-  const matrixClient = sdk.createClient({
-    baseUrl: session.chat.serverUrl,
-    accessToken: session.chat.accessToken,
-  });
-  await matrixClient.joinRoom(session.chat.roomId);
+  const { roomId, accessToken, serverUrl } = session.chat.credentials;
+  const matrixClient = sdk.createClient({ baseUrl: serverUrl, accessToken });
+  await matrixClient.joinRoom(roomId);
   matrixClient.startClient();
 }
 
-// Video via Janus JS API
+// Video — switch on provider
 if (session.videoRoom?.status === 'available') {
-  const janus = new Janus({
-    server: session.videoRoom.wsUrl,
-    iceServers: session.videoRoom.iceServers,
-  });
-  // Attach videoroom plugin and join room...
+  const creds = session.videoRoom.credentials;
+  switch (creds.provider) {
+    case 'livekit': {
+      // LiveKit: connect with token
+      const room = new LivekitClient.Room();
+      await room.connect(creds.url, creds.token);
+      break;
+    }
+    case 'janus': {
+      // Janus: connect via WebSocket
+      const janus = new Janus({
+        server: creds.wsUrl,
+        iceServers: creds.iceServers,
+      });
+      // Attach videoroom plugin and join room...
+      break;
+    }
+  }
 }
 ```
 
@@ -284,7 +355,7 @@ This gives clients full access to the Matrix CS-API for pagination, search, and 
 
 ## Participant control (optional)
 
-For meeting or call rooms, your backend can control Janus participants on behalf of moderators:
+Your backend can control media participants on behalf of moderators. These endpoints work identically regardless of which media provider (LiveKit or Janus) is active — the comms service handles the abstraction.
 
 ```http
 # Mute a single participant
@@ -313,10 +384,10 @@ POST /internal/v1/rooms/:contextId/invalidate-session
 
 # List all AudioBridge participants with mute state
 GET /internal/v1/rooms/:contextId/participants?appId=...&contextType=...
-# → [{ "id": 123, "display": "Jane Doe|uuid", "muted": false }, ...]
+# -> [{ "id": "participant-id", "display": "Jane Doe", "muted": false }, ...]
 ```
 
-These endpoints are only effective for rooms that have an active Janus session (modes `IN_PERSON`, `HYBRID`, or `REMOTE`). Calling them on `CHAT` mode rooms returns `400`.
+These endpoints are only effective for rooms that have an active media session (modes `IN_PERSON`, `HYBRID`, or `REMOTE`). Calling them on `CHAT` mode rooms returns `400`.
 
 ---
 
@@ -337,7 +408,7 @@ await commsClient.provision({
   appId: 'your-app-id',
   contextType: 'direct_message',
   contextId,
-  title: `DM: ${displayNameA} ↔ ${displayNameB}`,
+  title: `DM: ${displayNameA} <-> ${displayNameB}`,
   mode: 'CHAT',
 });
 
@@ -366,7 +437,7 @@ await commsClient.provision({
   appId: 'your-app-id',
   contextType: 'direct_call',
   contextId,
-  title: `Call: ${callerName} → ${calleeName}`,
+  title: `Call: ${callerName} -> ${calleeName}`,
   mode: 'IN_PERSON', // or 'HYBRID' for video
 });
 
@@ -389,7 +460,7 @@ await commsClient.close(contextId, 'your-app-id', 'direct_call');
 
 3. **Room mode is immutable.** Once provisioned, a room's mode cannot change. Provision a new room if the mode changes (e.g. an in-person meeting switches to hybrid).
 
-4. **Clients talk to Matrix/Janus directly.** The session response gives clients scoped tokens. Chat messages go directly to Matrix, video/audio goes directly to Janus. The communications-service is not a relay.
+4. **Clients talk to Matrix and the media backend (LiveKit or Janus) directly.** The session response gives clients scoped credentials. Chat messages go directly to Matrix, video/audio goes directly to the media provider. The communications-service is not a relay.
 
 5. **Graceful degradation.** Always check `status` fields before initializing a transport. If one capability is down, the others still work independently.
 
@@ -410,11 +481,13 @@ GET /health
 {
   "status": "ok",
   "matrix": "connected",
-  "janus": "connected"
+  "media": "connected",
+  "mediaProvider": "livekit",
+  "sip": "disabled"
 }
 ```
 
-If Matrix or Janus is unreachable, the respective field shows `"unreachable"` but the service remains up and continues processing requests for the available transports.
+If Matrix or the media provider is unreachable, the respective field shows `"unreachable"` but the service remains up and continues processing requests for the available transports.
 
 ---
 

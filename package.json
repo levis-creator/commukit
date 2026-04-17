@@ -1,9 +1,9 @@
 {
   "name": "vps-ke-communications-service",
   "version": "1.0.0",
-  "description": "Shared communications microservice — room-based chat and calls via Matrix + Janus",
+  "description": "Shared communications microservice — room-based chat and calls via Matrix + LiveKit (Janus fallback)",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "scripts": {
     "build": "nest build",
     "lint": "tsc --noEmit",
@@ -28,6 +28,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^16.6.1",
+    "helmet": "^8.1.0",
     "ioredis": "^5.10.0",
     "jsonwebtoken": "^9.0.2",
     "reflect-metadata": "^0.2.2",

@@ -1,19 +1,18 @@
 /**
  * MediaProvider — backend-agnostic contract for the audio/video transport.
  *
- * Implemented today by `JanusService` (Janus Gateway). A future `LivekitService`
- * or `JitsiService` can implement the same contract without any changes in
- * `RoomsService` or its callers.
+ * Shipped implementations:
+ * - `LivekitService` (LiveKit) — default, token-based auth, built-in SFU + mixer.
+ * - `JanusService` (Janus Gateway) — opt-in fallback, AudioBridge + VideoRoom plugins.
  *
- * **Room ref type (`number`):** kept as `number` in Phase 1 to match the existing
- * Janus storage (int rooms on `CommunicationRoom.janusAudioRoomId` /
- * `janusVideoRoomId`). The Phase 4 schema rename switches persistence to a
- * neutral string column; at that point this interface generalizes to `string`
- * and the Janus impl casts internally.
+ * **Room ref type (`number`):** kept as `number` to match the existing DB storage
+ * (`CommunicationRoom.audioRoomId` / `videoRoomId` mapped from the original
+ * Janus int columns via Prisma `@map`). Providers that use string room names
+ * (e.g. LiveKit) cast internally via a hash function.
  *
- * **SIP not included:** SIP plugin operations stay on `JanusService` as
- * vendor-specific helpers because the SIP bridge is inherently Janus-only
- * (Kamailio → Janus SIP plugin → AudioBridge). See `sip-bridge.service.ts`.
+ * **SIP not included:** SIP bridging lives behind a separate `SipProvider`
+ * interface because it is inherently coupled to the media backend's internal
+ * RTP plumbing. See `sip-provider.interface.ts`.
  */
 export interface IceServerConfig {
   urls: string[];
@@ -78,4 +77,25 @@ export interface MediaProvider {
 
   kickAudioParticipant(roomId: number, participantId: string | number): Promise<boolean>;
   kickVideoParticipant(roomId: number, participantId: string | number): Promise<boolean>;
+
+  // ── Optional provider-specific methods ──────────────────────────────────
+
+  /**
+   * Maps a numeric room ID to the provider's native room name.
+   * Falls back to `roomId.toString()` when not implemented (e.g. Janus uses int IDs directly).
+   */
+  roomNameFor?(roomId: number): string;
+
+  /**
+   * Generates a scoped participant access token for the given room.
+   * Returns `null` when the provider does not use tokens (e.g. Janus — clients
+   * connect via WebSocket with no pre-issued token).
+   */
+  createParticipantToken?(args: {
+    roomId: number;
+    identity: string;
+    name: string;
+    metadata?: Record<string, unknown>;
+    roomAdmin?: boolean;
+  }): Promise<string | null>;
 }

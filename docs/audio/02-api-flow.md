@@ -47,7 +47,9 @@ POST /internal/v1/rooms/:contextId/authorize-user
 ```
 
 Returns the session response — the audio-relevant fields are in
-`audioBridge`:
+`audioBridge`. The shape depends on the configured media provider.
+
+### With LiveKit (default)
 
 ```json
 {
@@ -56,8 +58,12 @@ Returns the session response — the audio-relevant fields are in
   "chat": { "status": "available", "...": "..." },
   "audioBridge": {
     "status": "available",
-    "roomId": 56789,
-    "wsUrl": "wss://janus.example.com/ws"
+    "credentials": {
+      "provider": "livekit",
+      "room": "comms-a1b2c3d4",
+      "url": "wss://livekit.example.com",
+      "token": "<participant-jwt>"
+    }
   },
   "videoRoom": null,
   "modeImmutable": true
@@ -67,27 +73,73 @@ Returns the session response — the audio-relevant fields are in
 | Field | Meaning |
 |---|---|
 | `audioBridge.status` | `"available"` or `"unavailable"` — always branch on this |
-| `audioBridge.roomId` | Integer Janus AudioBridge room id — pass to the `join` request |
-| `audioBridge.wsUrl` | Janus WebSocket URL |
+| `audioBridge.credentials.provider` | `"livekit"` — use to select client SDK |
+| `audioBridge.credentials.room` | Room name (format `comms-{hash}`) |
+| `audioBridge.credentials.url` | LiveKit server WebSocket URL |
+| `audioBridge.credentials.token` | Short-lived JWT (15 min) with participant identity embedded |
 
-When Janus is unreachable, `audioBridge` comes back as
+### With Janus
+
+```json
+{
+  "roomId": "<comms-room-uuid>",
+  "status": "ACTIVE",
+  "chat": { "status": "available", "...": "..." },
+  "audioBridge": {
+    "status": "available",
+    "credentials": {
+      "provider": "janus",
+      "roomId": 56789,
+      "wsUrl": "wss://janus.example.com/ws"
+    }
+  },
+  "videoRoom": null,
+  "modeImmutable": true
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `audioBridge.status` | `"available"` or `"unavailable"` — always branch on this |
+| `audioBridge.credentials.provider` | `"janus"` — use to select client SDK |
+| `audioBridge.credentials.roomId` | Integer Janus AudioBridge room id — pass to the `join` request |
+| `audioBridge.credentials.wsUrl` | Janus WebSocket URL |
+
+> **Note:** Legacy v1 responses also include flat fields (`roomId`,
+> `wsUrl`) directly on `audioBridge` for backward compatibility. New
+> integrations should use the `credentials` object and switch on
+> `credentials.provider`.
+
+When the media provider is unreachable, `audioBridge` comes back as
 `{ "status": "unavailable", "reason": "..." }` and the client should
 show a disabled UI.
 
 Note: `iceServers` lives under `videoRoom` in the response. For
-`IN_PERSON` rooms there is no `videoRoom`, so the client's Janus SDK
-falls back to whatever default ICE config it was initialized with (or
-you can fetch ICE config from a separate `GET` on your own backend if
-needed). In practice most Janus SDKs handle audio-only flows fine with
-the default `stun:stun.l.google.com:19302`.
+`IN_PERSON` rooms there is no `videoRoom`, so the client falls back to
+whatever default ICE config it was initialized with (or you can fetch
+ICE config from a separate `GET` on your own backend if needed).
 
-## 4. Client connects to Janus directly
+## 4. Client connects to the media provider directly
+
+### With LiveKit (default)
 
 The client:
 
-1. Opens a WebSocket to `audioBridge.wsUrl`
+1. Reads `audioBridge.credentials.token` and `audioBridge.credentials.url`
+2. Calls `Room.connect(url, token)` using the LiveKit client SDK
+3. Publishes an audio-only track
+4. Receives other participants' audio tracks via subscription callbacks
+
+Participant identity is embedded in the JWT — no display name convention
+needed on the client side.
+
+### With Janus
+
+The client:
+
+1. Opens a WebSocket to `audioBridge.credentials.wsUrl`
 2. Creates a Janus session, attaches to the `janus.plugin.audiobridge` plugin
-3. Joins `audioBridge.roomId` with display name `DisplayName|domainUserId`
+3. Joins `audioBridge.credentials.roomId` with display name `DisplayName|domainUserId`
 4. Sends an SDP offer configured for **audio only**
 5. Receives the mixed Opus stream from the server
 
@@ -105,8 +157,8 @@ POST /internal/v1/rooms/:contextId/invalidate-session { domainUserId }
 GET  /internal/v1/rooms/:contextId/participants
 ```
 
-Server-enforced — comms tells Janus to mute/unmute/kick and the client
-can't bypass it. See [05-moderation.md](05-moderation.md).
+Server-enforced — comms tells the media provider to mute/unmute/kick
+and the client can't bypass it. See [05-moderation.md](05-moderation.md).
 
 ## 6. Close when the call ends
 
@@ -114,7 +166,7 @@ can't bypass it. See [05-moderation.md](05-moderation.md).
 POST /internal/v1/rooms/:contextId/close
 ```
 
-Comms destroys the Janus AudioBridge room and publishes
+Comms destroys the audio room on the media provider and publishes
 `communications.room.closed`.
 
 ## RabbitMQ Events Emitted

@@ -4,9 +4,23 @@ Moderation commands are internal endpoints called by your backend on
 behalf of a user with moderator privileges. Your backend is responsible
 for deciding *who* is a moderator — comms just enforces the command.
 
+The moderation API is identical regardless of the active media provider.
+Comms translates each command into the appropriate provider call
+internally.
+
 ---
 
-## Display Name Convention (Required)
+## Participant Identity
+
+How comms resolves `domainUserId` to a participant depends on the provider.
+
+### With LiveKit (default)
+
+Participant identity is embedded in the JWT token metadata at
+authorize-time. Comms maps `domainUserId` directly to the participant
+identity in the LiveKit room — no client-side convention needed.
+
+### With Janus
 
 Clients **must** set their Janus display name to:
 
@@ -22,12 +36,14 @@ and matches the suffix exactly. Without this convention moderation
 degrades to a substring fallback (less precise, logs a warning) and can
 fail outright when display names overlap.
 
-### Hardware handles (reserved)
+### Hardware handles (Janus-specific)
 
 Displays containing `|HARDWARE` are reserved for physical room equipment
 (in-room mic arrays, codec systems). Comms refuses any moderation
 command that resolves to a `|HARDWARE` handle — kicking the room's own
-microphone would cut audio for everyone in that physical space.
+microphone would cut audio for everyone in that physical space. This
+convention applies only to Janus; LiveKit participants are always
+software clients.
 
 ---
 
@@ -110,8 +126,8 @@ GET /internal/v1/rooms/:contextId/participants?appId=myapp&contextType=CALL
 Returns:
 ```json
 [
-  { "id": 12345, "display": "Jane Doe|<uuid>", "muted": false },
-  { "id": 12346, "display": "Bob Smith|<uuid>", "muted": true }
+  { "id": "participant-id", "display": "Jane Doe", "domainUserId": "<uuid>", "muted": false },
+  { "id": "participant-id", "display": "Bob Smith", "domainUserId": "<uuid>", "muted": true }
 ]
 ```
 

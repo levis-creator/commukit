@@ -5,26 +5,30 @@ Comms-service has no dedicated "1:1 call" primitive. A 1:1 call is simply a
 simple and lets your app decide the UX — whether that's a ringing
 WhatsApp-style experience, a "click to join" link, or a scheduled meeting.
 
+Both LiveKit and Janus support this model identically at the API level.
+The only difference is how clients connect after receiving session
+credentials (see [03-integration.md, Step 7](03-integration.md#step-7--wire-the-client)).
+
 ---
 
 ## The Model
 
 ```
-┌─────────┐              ┌──────────────────────┐              ┌─────────┐
-│ Alice   │ ──────────▶  │ communications-service │ ◀───────── │ Bob     │
-│ (caller)│   authorize  │   (REMOTE room, cap 2) │  authorize │ (callee)│
-└────┬────┘              └──────────┬───────────┘              └────┬────┘
-     │                              │                               │
-     │ Janus WS (publish+sub)       │                               │ Janus WS
-     └──────────────────────────────┴───────────────────────────────┘
-                    via Janus VideoRoom SFU
++---------+              +----------------------+              +---------+
+| Alice   | ---------->  | communications-service | <--------- | Bob     |
+| (caller)|   authorize  |   (REMOTE room, cap 2) |  authorize | (callee)|
++----+----+              +----------+------------+              +----+----+
+     |                              |                               |
+     | connect (publish+sub)        |                               | connect
+     +------------------------------+-------------------------------+
+                    via media provider (LiveKit or Janus)
 ```
 
 - The room is keyed by a `contextId` you pick — e.g.
   `call:<alice-id>:<bob-id>:<timestamp>` or a pre-generated call uuid.
-- Both participants receive the same VideoRoom coordinates from
-  `authorize-user` and connect to Janus directly.
-- Janus forwards Alice's stream to Bob and vice versa.
+- Both participants receive the same video credentials from
+  `authorize-user` and connect to the media provider directly.
+- The provider forwards Alice's stream to Bob and vice versa.
 
 Why not peer-to-peer mesh for 1:1? SFU adds ~30ms latency but gives you
 working TURN, consistent behavior across 1:1 and group, a single code
@@ -94,7 +98,7 @@ router.post('/calls', requireAuth, async (req, res, next) => {
 });
 ```
 
-### 2. Bob receives the ring → opens the call screen → accepts
+### 2. Bob receives the ring -> opens the call screen -> accepts
 
 ```js
 // POST /calls/:id/accept
@@ -152,8 +156,8 @@ router.get('/calls/:id/communications-session', requireAuth, async (req, res, ne
 });
 ```
 
-Both Alice's and Bob's clients use the video connection flow from
-[03-integration.md, Step 7](03-integration.md#step-7--wire-the-client-browser--janus-web-sdk)
+Both Alice's and Bob's clients use the provider-dispatch pattern from
+[03-integration.md, Step 7](03-integration.md#step-7--wire-the-client)
 unchanged.
 
 ### 4. Decline / timeout / hangup
@@ -180,7 +184,7 @@ router.post('/calls/:id/hangup', requireAuth, async (req, res, next) => {
       data: { status: endStatus, endedAt: new Date() },
     });
 
-    // Close the comms room in all cases — destroys the Janus room and
+    // Close the comms room — destroys the media room and
     // invalidates any cached sessions.
     await closeRoom(call.id, 'CALL');
 
@@ -210,7 +214,7 @@ longer than your timeout (e.g. 45s), transition it to `MISSED` and call
 | **Pre-flight mic/cam check** | Let Alice open a local preview before the `POST /calls` so she's not greeted with a permission prompt after Bob picks up. |
 | **Call history** | Persist `call` rows in your own DB — comms only stores a room, not a call. Your `status` + timestamps become the history. |
 | **Missed calls** | Listen to `communications.room.closed` events and, if your DB still shows `RINGING`, mark as `MISSED` and push a notification to the callee. |
-| **Reconnection** | If a participant drops, `GET /communications-session` again — the same coordinates come back as long as the room is still `ACTIVE`. |
+| **Reconnection** | If a participant drops, `GET /communications-session` again — the same credentials come back as long as the room is still `ACTIVE`. |
 
 ---
 
@@ -218,6 +222,7 @@ longer than your timeout (e.g. 45s), transition it to `MISSED` and call
 
 The same flow works for small group calls (3-10 participants) with zero
 changes — just authorize more users to the same room. Past ~20
-participants, review Janus resource limits and consider simulcast; past
-~50, move to paginated subscriber lists or a broadcaster/viewer split.
-Comms-service itself has no built-in cap.
+participants, review media provider resource limits and consider
+simulcast (LiveKit enables this automatically with `dynacast`; for Janus,
+configure it explicitly). Past ~50, move to paginated subscriber lists or
+a broadcaster/viewer split. Comms-service itself has no built-in cap.

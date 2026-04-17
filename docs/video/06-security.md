@@ -1,10 +1,72 @@
 # 06 — Security & Privacy
 
+## Service-to-Service Authentication
+
+Both providers use the same internal JWT for service-to-service auth
+between your backend and comms-service:
+
+| Secret | Purpose | Must match across |
+|---|---|---|
+| `INTERNAL_SERVICE_SECRET` | Signs internal JWTs (`aud: "communications-service"`) | comms replicas + every consumer backend |
+
+## Media Provider Security
+
+### With LiveKit (default)
+
+LiveKit uses **JWT participant tokens** for all access control:
+
+- Comms-service mints a participant token (HS256, signed with
+  `LIVEKIT_API_SECRET`) when `authorize-user` is called.
+- Tokens expire after **15 minutes**. Clients must re-authorize to get a
+  fresh token if the session outlasts the TTL (the LiveKit SDK handles
+  reconnection automatically when configured).
+- Each token is **room-scoped** — it grants access to exactly one room.
+- Permissions are encoded in token claims:
+  - `canPublish`: can send audio/video tracks
+  - `canSubscribe`: can receive other participants' tracks
+  - `canPublishData`: can send data messages
+- Participant identity (`domainUserId`) is embedded in the token — it
+  cannot be spoofed by the client.
+- LiveKit has **built-in TURN** so no separate coturn is needed. Media
+  connectivity works behind NAT/firewalls without extra configuration.
+
+Secrets to protect:
+
+| Secret | Purpose |
+|---|---|
+| `LIVEKIT_API_KEY` | Identifies the comms-service to LiveKit |
+| `LIVEKIT_API_SECRET` | Signs participant tokens — compromise = full room access |
+
+### With Janus
+
+Janus does not use per-user access tokens. Access control is based on
+**room membership** enforced by comms-service:
+
+- Comms only returns VideoRoom coordinates to users authorized via
+  `authorize-user`.
+- `invalidate-session` is the primary mechanism for revoking access. A
+  client with stale coordinates cannot rejoin once the membership row
+  is marked `leftAt`.
+- Room IDs are integers Janus generates — don't rely on obscurity.
+
+Janus requires a separate **coturn** TURN server for NAT traversal:
+
+| Secret | Purpose | Must match across |
+|---|---|---|
+| `JANUS_TURN_USERNAME` / `JANUS_TURN_CREDENTIAL` | TURN long-term creds | comms + coturn |
+
 ## TURN Credentials
+
+### With LiveKit (default)
+
+Built-in TURN — no separate credentials to manage. LiveKit negotiates
+TURN internally.
+
+### With Janus
 
 The ICE servers array returned in the session response includes TURN
 credentials that your clients will use to relay media when direct or
-reflexive candidates fail. A few things to keep in mind:
+reflexive candidates fail:
 
 - **Rotate TURN credentials** regularly. coturn supports
   time-limited credentials via HMAC; configure comms's
@@ -18,55 +80,56 @@ reflexive candidates fail. A few things to keep in mind:
 
 ## Media Privacy
 
-- Janus VideoRoom forwards media without transcoding. Media between
-  clients is **SRTP-encrypted end-to-end with Janus as an intermediate
-  hop** — the SFU terminates DTLS and re-encrypts per subscriber. This
-  is standard SFU behavior; it's not true end-to-end encryption.
+Both providers operate as an SFU — media is **SRTP-encrypted between
+each client and the server**. The SFU terminates DTLS and re-encrypts
+per subscriber. This is standard SFU behavior; it is not true
+end-to-end encryption.
+
 - For true E2EE you'd need Insertable Streams / SFrame at the client
   level. Comms-service doesn't provide this out of the box.
 - Rooms are private: only users your backend explicitly authorizes can
-  join. Janus is not reachable from the public internet — only via the
-  WebSocket URL returned in the session, which comms can rotate.
+  join. The media server is not directly reachable from the public
+  internet without valid credentials (LiveKit token or Janus room
+  coordinates returned in the session).
 
-## Access Token Scoping
+### LiveKit specifics
 
-- Unlike chat, Janus doesn't use per-user access tokens — the
-  VideoRoom's access control is based on **room membership**. Comms
-  enforces this by only returning the VideoRoom coordinates to
-  authorized users and by validating membership on every
-  `authorize-user` call.
-- `invalidate-session` is the primary mechanism for removing a user's
-  access. A client with stale coordinates cannot rejoin once the
-  membership row is marked `leftAt`.
-- Room IDs are not secret — they're integers Janus generates. Don't
-  rely on obscurity. Rely on membership.
+- LiveKit supports adaptive bitrate and simulcast by default, which
+  limits bandwidth abuse without explicit configuration.
+- Room names are opaque hashed strings (`comms-{hash}`) — not
+  guessable.
 
-## Shared Secrets
+### Janus specifics
 
-| Secret | Purpose | Must match across |
-|---|---|---|
-| `INTERNAL_SERVICE_SECRET` | Signs internal JWTs | comms replicas + every consumer backend |
-| `JANUS_TURN_USERNAME` / `JANUS_TURN_CREDENTIAL` | TURN long-term creds | comms + coturn (or your TURN server) |
-
-Rotating these requires a coordinated restart.
+- Configure `bitrate` / `bitrate_cap` on the VideoRoom plugin to
+  enforce a bandwidth ceiling against malicious high-bitrate publishers.
 
 ## Session Invalidation Mechanisms
 
 Three ways a user's video session ends:
 
-1. **`kick-video` + `invalidate-session`** — removes from VideoRoom and
-   blocks future `authorize-user` calls. Use this for enforced
+1. **`kick-video` + `invalidate-session`** — removes from the media room
+   and blocks future `authorize-user` calls. Use this for enforced
    expulsion.
-2. **`closeRoom`** — destroys the Janus VideoRoom entirely. Everyone
-   currently subscribed sees `detached` / `hangup` events.
-3. **Client disconnect** — if the client closes its Janus WebSocket,
-   the VideoRoom removes them automatically. No server call needed.
+2. **`closeRoom`** — destroys the media room entirely. All connected
+   clients are disconnected.
+3. **Client disconnect** — if the client disconnects, the provider
+   removes them automatically. No server call needed.
 
 ## Recording
 
-Comms-service does **not** record by default. Janus ships with a
-post-processing tool (`janus-pp-rec`) and supports per-publisher RTP
-recording hooks. To enable recording, you'd:
+Comms-service does **not** record by default.
+
+### With LiveKit
+
+LiveKit supports server-side composite and track recording via its
+Egress API. To enable, configure `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`
+and call the Egress RPC from your service. Produces MP4/WebM directly.
+
+### With Janus
+
+Janus ships with a post-processing tool (`janus-pp-rec`) and supports
+per-publisher RTP recording hooks:
 
 1. Edit `janus.plugin.videoroom.jcfg` to set `record = true` on the
    rooms you care about (or pass `record: true` in the `create` request
@@ -74,25 +137,21 @@ recording hooks. To enable recording, you'd:
 2. Mount a recording directory into the Janus container.
 3. Run `janus-pp-rec` after the fact to produce WebM/MP4.
 
-Before enabling, consult your legal team — recording rules vary by
-jurisdiction, especially for 1:1 calls and cross-border participants.
-Make sure your UI discloses recording clearly and captures consent.
-
-If you need recording, you may want to build an "archiver" service that
-subscribes to RabbitMQ events, picks up completed recordings from disk,
-and uploads them to object storage tied to your domain context id.
+Before enabling recording with either provider, consult your legal team —
+recording rules vary by jurisdiction, especially for 1:1 calls and
+cross-border participants. Make sure your UI discloses recording clearly
+and captures consent.
 
 ## What Comms Does NOT Protect Against
 
 - **Domain-level authorization** (e.g. "is this user actually allowed in
   this call?") is the calling service's responsibility. Comms trusts the
   internal JWT and the `domainUserId` it carries.
-- **Client-side credential storage.** Once the client receives the
-  VideoRoom coordinates and TURN creds, secure storage is the client's
-  job (e.g. `flutter_secure_storage`, iOS Keychain, encrypted prefs).
-- **Bandwidth abuse.** A malicious client can try to publish extremely
-  high bitrates. Configure Janus's `bitrate` / `bitrate_cap` on the
-  VideoRoom plugin to enforce a ceiling.
+- **Client-side credential storage.** Once the client receives session
+  credentials, secure storage is the client's job (e.g.
+  `flutter_secure_storage`, iOS Keychain, encrypted prefs).
+- **Bandwidth abuse.** LiveKit handles this via adaptive bitrate. For
+  Janus, configure `bitrate_cap` on the VideoRoom plugin.
 
 ## Audit Trail
 
