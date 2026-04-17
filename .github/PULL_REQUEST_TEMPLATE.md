@@ -24,6 +24,7 @@ so reviewers know you considered it.
 
 ## Checklist
 
+- [ ] This change is in scope per [`docs/SCOPE.md`](../docs/SCOPE.md) (or links to a Discussion proposing a scope change)
 - [ ] Tests added or updated for any behavior change
 - [ ] Docs updated (README / CONTRIBUTING / inline, or N/A)
 - [ ] Breaking change? If yes, explain above and use `feat!:` / `fix!:` with a `BREAKING CHANGE:` footer

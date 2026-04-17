@@ -439,6 +439,18 @@ vps-ke-communications-service/
 - Graceful degradation is intentional. A booting server with unavailable capabilities is not necessarily broken.
 - Closing a room invalidates access, but transport-specific in-flight behavior still depends on backend realities.
 
+## Project
+
+If you're thinking about contributing — or just want to understand how the project is run — start here:
+
+- [`docs/SCOPE.md`](docs/SCOPE.md) — what's in scope, what's out of scope, and how to propose a scope change.
+- [`MAINTAINERS.md`](MAINTAINERS.md) — who the maintainers are and the path to becoming one.
+- [`GOVERNANCE.md`](GOVERNANCE.md) — how decisions are made.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, Conventional Commits, merge rubric, response SLA.
+- [`ROADMAP.md`](ROADMAP.md) — near-term planned / in-progress / considering items.
+- [`RELEASING.md`](RELEASING.md) — how versions get cut.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability.
+
 ## License
 
 ### License
