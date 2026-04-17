@@ -1,0 +1,9 @@
+dist/
+coverage/
+node_modules/
+prisma/migrations/
+package-lock.json
+CHANGELOG.md
+LICENSE
+NOTICE
+COPYING.HEADER
