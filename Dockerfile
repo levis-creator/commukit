@@ -21,6 +21,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package*.json ./
 COPY entrypoint.sh ./entrypoint.sh
+COPY LICENSE /app/LICENSE
+COPY NOTICE /app/NOTICE
 
 RUN chmod +x ./entrypoint.sh
 
