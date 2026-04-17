@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 # OpenSSL 3 is required by Prisma's query/schema engine on Alpine.
 # Without it Prisma defaults to the non-existent openssl-1.1.x path
@@ -17,7 +17,7 @@ COPY . .
 RUN npm run build
 
 # ── Production ──────────────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:25-alpine
 
 # OpenSSL 3 — see builder-stage comment. Prisma's query engine links
 # against it at runtime.
