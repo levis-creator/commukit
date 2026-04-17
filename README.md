@@ -1,5 +1,11 @@
 # Communications Service
 
+[![CI](https://github.com/levis-creator/commukit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/levis-creator/commukit/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/levis-creator/commukit/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/levis-creator/commukit/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/levis-creator/commukit?display_name=tag&sort=semver)](https://github.com/levis-creator/commukit/releases)
+[![Docker image](https://img.shields.io/badge/ghcr.io-levis--creator%2Fcommukit-2496ED?logo=docker&logoColor=white)](https://github.com/levis-creator/commukit/pkgs/container/commukit)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 A reusable, app-agnostic NestJS microservice for room-based communications. It gives any backend a small HTTP contract for provisioning rooms, authorizing users, and moderating sessions while delegating transport details to Matrix, Janus, and optional SIP infrastructure.
 
 The service is multi-tenant. Many consumer apps can share one deployment and stay isolated by `appId`.
@@ -77,25 +83,25 @@ This service helps with transport and session lifecycle, but your app still owns
 
 ## Capability Map
 
-| Capability | Backend | Notes |
-|---|---|---|
-| Chat | Matrix Synapse | Private app-scoped rooms |
-| Audio | Janus AudioBridge | Mixer model, server-enforced mute |
-| Video | Janus VideoRoom | SFU model |
-| SIP | Kamailio + Janus SIP plugin | Free softphone access, no PSTN |
+| Capability | Backend                     | Notes                             |
+| ---------- | --------------------------- | --------------------------------- |
+| Chat       | Matrix Synapse              | Private app-scoped rooms          |
+| Audio      | Janus AudioBridge           | Mixer model, server-enforced mute |
+| Video      | Janus VideoRoom             | SFU model                         |
+| SIP        | Kamailio + Janus SIP plugin | Free softphone access, no PSTN    |
 
 ## Documentation Map
 
 Start with the capability README that matches your use case:
 
-| Area | Path | Covers |
-|---|---|---|
-| Chat | [`docs/chat/README.md`](docs/chat/README.md) | Matrix rooms, provisioning, persistence options |
-| Audio | [`docs/audio/README.md`](docs/audio/README.md) | AudioBridge architecture, voice flows, moderation |
-| Video | [`docs/video/README.md`](docs/video/README.md) | VideoRoom flows, 1:1 and group video |
-| SIP | [`docs/sip/README.md`](docs/sip/README.md) | Softphone credentials, registrar flow, troubleshooting |
-| Providers | [`docs/PROVIDERS.md`](docs/PROVIDERS.md) | Pluggable provider model and current support limits |
-| Onboarding | [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md) | End-to-end integration overview |
+| Area       | Path                                                     | Covers                                                 |
+| ---------- | -------------------------------------------------------- | ------------------------------------------------------ |
+| Chat       | [`docs/chat/README.md`](docs/chat/README.md)             | Matrix rooms, provisioning, persistence options        |
+| Audio      | [`docs/audio/README.md`](docs/audio/README.md)           | AudioBridge architecture, voice flows, moderation      |
+| Video      | [`docs/video/README.md`](docs/video/README.md)           | VideoRoom flows, 1:1 and group video                   |
+| SIP        | [`docs/sip/README.md`](docs/sip/README.md)               | Softphone credentials, registrar flow, troubleshooting |
+| Providers  | [`docs/PROVIDERS.md`](docs/PROVIDERS.md)                 | Pluggable provider model and current support limits    |
+| Onboarding | [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md) | End-to-end integration overview                        |
 
 ## Quick Start
 
@@ -144,12 +150,12 @@ For local non-Docker development, PostgreSQL, Redis, and RabbitMQ must already b
 
 These services are required in every deployment:
 
-| Service | Role |
-|---|---|
-| `communications-service` | HTTP API and orchestration |
-| `postgres` | Prisma-backed persistence |
-| `redis` | Cooldowns, cache, transient coordination |
-| `rabbitmq` | Room lifecycle event publishing |
+| Service                  | Role                                     |
+| ------------------------ | ---------------------------------------- |
+| `communications-service` | HTTP API and orchestration               |
+| `postgres`               | Prisma-backed persistence                |
+| `redis`                  | Cooldowns, cache, transient coordination |
+| `rabbitmq`               | Room lifecycle event publishing          |
 
 With only the core running, the API still boots. Capability fields simply come back as unavailable with a reason.
 
@@ -157,12 +163,12 @@ With only the core running, the API still boots. Capability fields simply come b
 
 The Docker Compose stack gates optional infrastructure behind profiles:
 
-| Profile | Containers | Purpose | Main flag |
-|---|---|---|---|
-| `chat` | `synapse` | Matrix chat | `MATRIX_ENABLED=true` |
-| `media` | `janus-gateway`, `coturn` | Janus audio and video | `JANUS_ENABLED=true` |
-| `sip` | `kamailio` | SIP softphones into AudioBridge | `SIP_ENABLED=true` |
-| `livekit` | `livekit`, `livekit-sip` | LiveKit media + SIP backend | `MEDIA_PROVIDER=livekit` |
+| Profile   | Containers                | Purpose                         | Main flag                |
+| --------- | ------------------------- | ------------------------------- | ------------------------ |
+| `chat`    | `synapse`                 | Matrix chat                     | `MATRIX_ENABLED=true`    |
+| `media`   | `janus-gateway`, `coturn` | Janus audio and video           | `JANUS_ENABLED=true`     |
+| `sip`     | `kamailio`                | SIP softphones into AudioBridge | `SIP_ENABLED=true`       |
+| `livekit` | `livekit`, `livekit-sip`  | LiveKit media + SIP backend     | `MEDIA_PROVIDER=livekit` |
 
 Examples:
 
@@ -187,31 +193,31 @@ COMPOSE_PROFILES=chat,livekit docker compose up -d
 
 The codebase is provider-oriented, but the practical support story today is:
 
-| Media provider | SIP | Status |
-|---|---|---|
-| `janus` | off | Supported |
-| `janus` | on | Supported |
-| `livekit` | off | Supported |
-| `livekit` | on | Supported with LiveKit SIP ingress / dispatch configuration |
+| Media provider | SIP | Status                                                      |
+| -------------- | --- | ----------------------------------------------------------- |
+| `janus`        | off | Supported                                                   |
+| `janus`        | on  | Supported                                                   |
+| `livekit`      | off | Supported                                                   |
+| `livekit`      | on  | Supported with LiveKit SIP ingress / dispatch configuration |
 
 ## Configuration
 
 See [`.env.example`](.env.example) for the full template. The most important groups are:
 
-| Group | Variables |
-|---|---|
-| Service | `NODE_ENV`, `COMMS_SERVICE_PORT` |
-| Capability toggles | `MATRIX_ENABLED`, `JANUS_ENABLED`, `SIP_ENABLED` |
-| Provider selection | `MEDIA_PROVIDER`, `CHAT_PROVIDER` |
-| Database | `DATABASE_URL` |
-| Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
-| Messaging | `RABBITMQ_URL`, `RMQ_EXCHANGE`, `RMQ_QUEUE` |
-| Auth | `INTERNAL_SERVICE_SECRET` |
-| Matrix | `MATRIX_SERVER_URL`, `MATRIX_PUBLIC_SERVER_URL`, `MATRIX_SERVER_NAME`, `MATRIX_BOT_*` |
-| Janus | `JANUS_HTTP_URL`, `JANUS_WS_URL`, `JANUS_PUBLIC_WS_URL`, `JANUS_ICE_SERVERS` |
-| TURN | `TURN_USERNAME`, `TURN_PASSWORD`, `TURN_REALM`, `TURN_EXTERNAL_IP` |
-| SIP | `SIP_DOMAIN`, `SIP_REGISTRAR_HOST`, `SIP_BRIDGE_USERNAME`, `SIP_BRIDGE_PASSWORD` |
-| LiveKit | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_SIP_HOST`, `LIVEKIT_SIP_PORT`, `LIVEKIT_SIP_TRANSPORT`, `LIVEKIT_SIP_USERNAME`, `LIVEKIT_SIP_PASSWORD` |
+| Group              | Variables                                                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service            | `NODE_ENV`, `COMMS_SERVICE_PORT`                                                                                                                                        |
+| Capability toggles | `MATRIX_ENABLED`, `JANUS_ENABLED`, `SIP_ENABLED`                                                                                                                        |
+| Provider selection | `MEDIA_PROVIDER`, `CHAT_PROVIDER`                                                                                                                                       |
+| Database           | `DATABASE_URL`                                                                                                                                                          |
+| Redis              | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`                                                                                                                            |
+| Messaging          | `RABBITMQ_URL`, `RMQ_EXCHANGE`, `RMQ_QUEUE`                                                                                                                             |
+| Auth               | `INTERNAL_SERVICE_SECRET`                                                                                                                                               |
+| Matrix             | `MATRIX_SERVER_URL`, `MATRIX_PUBLIC_SERVER_URL`, `MATRIX_SERVER_NAME`, `MATRIX_BOT_*`                                                                                   |
+| Janus              | `JANUS_HTTP_URL`, `JANUS_WS_URL`, `JANUS_PUBLIC_WS_URL`, `JANUS_ICE_SERVERS`                                                                                            |
+| TURN               | `TURN_USERNAME`, `TURN_PASSWORD`, `TURN_REALM`, `TURN_EXTERNAL_IP`                                                                                                      |
+| SIP                | `SIP_DOMAIN`, `SIP_REGISTRAR_HOST`, `SIP_BRIDGE_USERNAME`, `SIP_BRIDGE_PASSWORD`                                                                                        |
+| LiveKit            | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_SIP_HOST`, `LIVEKIT_SIP_PORT`, `LIVEKIT_SIP_TRANSPORT`, `LIVEKIT_SIP_USERNAME`, `LIVEKIT_SIP_PASSWORD` |
 
 ## Health Semantics
 
@@ -237,36 +243,36 @@ All internal endpoints require:
 
 ### Room Lifecycle
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/internal/v1/rooms/provision` | Idempotently create a room for a domain context |
-| `POST` | `/internal/v1/rooms/:contextId/activate` | Mark a room active |
-| `POST` | `/internal/v1/rooms/:contextId/close` | Close a room |
-| `POST` | `/internal/v1/rooms/:contextId/authorize-user` | Return user session credentials |
+| Method | Path                                           | Purpose                                         |
+| ------ | ---------------------------------------------- | ----------------------------------------------- |
+| `POST` | `/internal/v1/rooms/provision`                 | Idempotently create a room for a domain context |
+| `POST` | `/internal/v1/rooms/:contextId/activate`       | Mark a room active                              |
+| `POST` | `/internal/v1/rooms/:contextId/close`          | Close a room                                    |
+| `POST` | `/internal/v1/rooms/:contextId/authorize-user` | Return user session credentials                 |
 
 ### Moderation and Control
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/internal/v1/rooms/:contextId/participants` | List audio participants |
-| `POST` | `/internal/v1/rooms/:contextId/mute` | Mute one audio participant |
-| `POST` | `/internal/v1/rooms/:contextId/unmute` | Unmute one audio participant |
-| `POST` | `/internal/v1/rooms/:contextId/mute-room` | Mute the whole audio room |
-| `POST` | `/internal/v1/rooms/:contextId/kick-audio` | Kick from AudioBridge |
-| `POST` | `/internal/v1/rooms/:contextId/kick-video` | Kick from VideoRoom |
+| Method | Path                                               | Purpose                         |
+| ------ | -------------------------------------------------- | ------------------------------- |
+| `GET`  | `/internal/v1/rooms/:contextId/participants`       | List audio participants         |
+| `POST` | `/internal/v1/rooms/:contextId/mute`               | Mute one audio participant      |
+| `POST` | `/internal/v1/rooms/:contextId/unmute`             | Unmute one audio participant    |
+| `POST` | `/internal/v1/rooms/:contextId/mute-room`          | Mute the whole audio room       |
+| `POST` | `/internal/v1/rooms/:contextId/kick-audio`         | Kick from AudioBridge           |
+| `POST` | `/internal/v1/rooms/:contextId/kick-video`         | Kick from VideoRoom             |
 | `POST` | `/internal/v1/rooms/:contextId/invalidate-session` | Prevent future re-authorization |
 
 ### User SIP Endpoint
 
-| Method | Path | Purpose |
-|---|---|---|
+| Method | Path                                 | Purpose                                        |
+| ------ | ------------------------------------ | ---------------------------------------------- |
 | `POST` | `/internal/v1/users/sip-credentials` | Fetch or mint softphone credentials for a user |
 
 ### Health
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Unauthenticated health check |
+| Method | Path      | Purpose                      |
+| ------ | --------- | ---------------------------- |
+| `GET`  | `/health` | Unauthenticated health check |
 
 ## Session Response Shape
 
@@ -310,16 +316,12 @@ Example:
     "status": "available",
     "roomId": 789012,
     "wsUrl": "ws://janus:8188",
-    "iceServers": [
-      { "urls": ["stun:stun.l.google.com:19302"] }
-    ],
+    "iceServers": [{ "urls": ["stun:stun.l.google.com:19302"] }],
     "credentials": {
       "provider": "janus",
       "roomId": 789012,
       "wsUrl": "ws://janus:8188",
-      "iceServers": [
-        { "urls": ["stun:stun.l.google.com:19302"] }
-      ]
+      "iceServers": [{ "urls": ["stun:stun.l.google.com:19302"] }]
     }
   },
   "sip": {
@@ -344,24 +346,24 @@ The service supports a migration-friendly response shape:
 
 ## Room Modes
 
-| Mode | Chat | Audio | Video | Typical use |
-|---|:---:|:---:|:---:|---|
-| `IN_PERSON` | Yes | Yes | No | Physical room with mixed audio |
-| `HYBRID` | Yes | Yes | Yes | In-room plus remote attendees |
-| `REMOTE` | Yes | No | Yes | Fully remote video session |
-| `CHAT` | Yes | No | No | Direct messages or text-only channels |
+| Mode        | Chat | Audio | Video | Typical use                           |
+| ----------- | :--: | :---: | :---: | ------------------------------------- |
+| `IN_PERSON` | Yes  |  Yes  |  No   | Physical room with mixed audio        |
+| `HYBRID`    | Yes  |  Yes  |  Yes  | In-room plus remote attendees         |
+| `REMOTE`    | Yes  |  No   |  Yes  | Fully remote video session            |
+| `CHAT`      | Yes  |  No   |  No   | Direct messages or text-only channels |
 
 Room mode is immutable. If your domain flow changes from text-only to video later, provision a new room under a new context.
 
 ## Example Domain Mapping
 
-| Use case | Suggested `contextType` | Suggested `contextId` |
-|---|---|---|
-| Scheduled meeting | `meeting` | meeting UUID |
-| Direct call | `direct_call` | stable pair key such as `call_<idA>_<idB>` |
-| Direct message | `direct_message` | stable pair key such as `dm_<idA>_<idB>` |
-| Team channel | `channel` | channel UUID |
-| Support thread | `ticket` | ticket ID |
+| Use case          | Suggested `contextType` | Suggested `contextId`                      |
+| ----------------- | ----------------------- | ------------------------------------------ |
+| Scheduled meeting | `meeting`               | meeting UUID                               |
+| Direct call       | `direct_call`           | stable pair key such as `call_<idA>_<idB>` |
+| Direct message    | `direct_message`        | stable pair key such as `dm_<idA>_<idB>`   |
+| Team channel      | `channel`               | channel UUID                               |
+| Support thread    | `ticket`                | ticket ID                                  |
 
 For 1:1 contexts, sort the user IDs before building the key so provisioning stays idempotent regardless of who initiated the interaction.
 
@@ -371,12 +373,12 @@ These are only examples. A Parliament hearing, a school class, a telehealth sess
 
 Main tables:
 
-| Table | Purpose |
-|---|---|
-| `communication_users` | Maps domain users to transport identities and SIP credentials |
-| `communication_rooms` | Room metadata, lifecycle state, transport room IDs |
-| `communication_memberships` | User-room authorization and invalidation state |
-| `communication_audit_logs` | Immutable audit trail |
+| Table                       | Purpose                                                       |
+| --------------------------- | ------------------------------------------------------------- |
+| `communication_users`       | Maps domain users to transport identities and SIP credentials |
+| `communication_rooms`       | Room metadata, lifecycle state, transport room IDs            |
+| `communication_memberships` | User-room authorization and invalidation state                |
+| `communication_audit_logs`  | Immutable audit trail                                         |
 
 ## Architecture Notes
 
