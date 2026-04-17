@@ -1,0 +1,39 @@
+title: "[question] "
+labels: ["type/docs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Welcome — this template is for usage, deployment, or architecture questions about commukit. For bug reports, please use the bug issue template instead.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to accomplish, and what's unclear or going wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-i-tried
+    attributes:
+      label: What you've tried so far
+      description: Docs read, endpoints called, config values tried. Helps us skip suggestions you've already ruled out.
+    validations:
+      required: false
+
+  - type: input
+    id: commukit-version
+    attributes:
+      label: commukit version or commit
+      placeholder: "v0.1.0 or abcdef0"
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment mode (docker-compose / k8s / bare metal), providers enabled (matrix / janus / livekit / kamailio), and anything else relevant.
+    validations:
+      required: false

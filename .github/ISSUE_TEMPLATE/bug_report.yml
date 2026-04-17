@@ -1,0 +1,97 @@
+name: Bug report
+description: Report something that is broken or behaves unexpectedly in commukit.
+title: "[bug] "
+labels: ["type/bug", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        Before submitting, please confirm the issue is in commukit itself and not in one of the upstream transports (Matrix Synapse, Janus Gateway, coturn, Kamailio, LiveKit). See `SECURITY.md` for upstream report locations.
+
+  - type: dropdown
+    id: capability
+    attributes:
+      label: Capability affected
+      description: Which capability is misbehaving?
+      options:
+        - chat
+        - audio
+        - video
+        - sip
+        - health
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Which transport provider is in the failure path?
+      options:
+        - matrix
+        - janus
+        - livekit
+        - kamailio
+        - not applicable / unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, commukit version or commit SHA, deployment mode (docker-compose, k8s, bare metal).
+      placeholder: |
+        - OS: Ubuntu 24.04
+        - Node: 20.11.1
+        - commukit: v0.1.0 (or commit abcdef0)
+        - Deployment: docker-compose
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimum steps someone else can follow to reproduce the bug.
+      placeholder: |
+        1. POST /internal/v1/rooms/provision with ...
+        2. POST /internal/v1/rooms/:contextId/authorize-user with ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: health-output
+    attributes:
+      label: GET /health output
+      description: Paste the full JSON response from `GET /health` at the time of the failure.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact any tokens, secrets, or PII before pasting.
+      render: shell
+    validations:
+      required: false

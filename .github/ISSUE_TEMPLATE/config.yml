@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/levis-creator/commukit/discussions
+    about: Use Discussions for usage questions, architecture queries, and change proposals.
+  - name: Security report
+    url: https://github.com/levis-creator/commukit/blob/main/SECURITY.md
+    about: Suspected vulnerability? Follow SECURITY.md — do not open a public issue.

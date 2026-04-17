@@ -1,0 +1,25 @@
+# CODEOWNERS — auto-requests review from the listed owners on any PR
+# that changes the matching paths. See:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# The last matching pattern wins, so more specific globs should come later.
+
+# Default owner — applies to anything not matched below.
+*                           @levis-creator
+
+# Provider adapters
+/src/janus/                 @levis-creator
+/src/livekit/               @levis-creator
+/src/matrix/                @levis-creator
+/src/sip/                   @levis-creator
+
+# Domain core
+/src/rooms/                 @levis-creator
+/src/auth/                  @levis-creator
+/src/providers/             @levis-creator
+
+# Infrastructure & docs
+/infra/                     @levis-creator
+/docs/                      @levis-creator
+/prisma/                    @levis-creator
+/.github/                   @levis-creator

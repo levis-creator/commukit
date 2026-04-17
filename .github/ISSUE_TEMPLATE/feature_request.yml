@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a new feature, enhancement, or API addition.
+title: "[feat] "
+labels: ["type/feature", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: significant changes (new API endpoints, new provider adapters, auth-model changes, new runtime dependencies) usually benefit from a [GitHub Discussion](https://github.com/levis-creator/commukit/discussions) first. Use this form for well-scoped additions.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user- or operator-facing problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature, API shape, or behavior change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you consider, and why is the proposal above preferable?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: willingness-to-contribute
+    attributes:
+      label: Willingness to contribute
+      description: Would you be able to help implement this?
+      options:
+        - Yes, I'll open a PR
+        - Yes, with guidance
+        - No, reporting only
+    validations:
+      required: true

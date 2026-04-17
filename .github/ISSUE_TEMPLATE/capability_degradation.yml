@@ -1,0 +1,76 @@
+name: Capability degradation
+description: A capability (chat / audio / video / sip) is reporting degraded on `/health` or failing authorize-user.
+title: "[degradation] "
+labels: ["type/bug", "capability/health", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when commukit is running but a capability is reporting `unavailable`, or when `/authorize-user` is returning `unreachable`, `unregistered`, `incompatible-media`, or a similar degradation signal. The goal is to help us rule out upstream provider issues quickly.
+
+  - type: dropdown
+    id: capability
+    attributes:
+      label: Capability
+      options:
+        - chat
+        - audio
+        - video
+        - sip
+        - webhook publisher (RabbitMQ)
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: degradation-signal
+    attributes:
+      label: Degradation signal
+      description: What is commukit reporting about this capability?
+      options:
+        - unavailable on GET /health
+        - unreachable
+        - unregistered
+        - incompatible-media
+        - auth failure
+        - other
+    validations:
+      required: true
+
+  - type: input
+    id: onset
+    attributes:
+      label: When did it start?
+      description: Timestamp or rough window. Include timezone.
+      placeholder: "2026-04-17 14:30 UTC, or 'about 20 minutes ago'"
+    validations:
+      required: true
+
+  - type: textarea
+    id: health-output
+    attributes:
+      label: GET /health response
+      description: Paste the full JSON response. Do not trim.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: recent-changes
+    attributes:
+      label: Recent changes
+      description: Any recent deploys, config changes, or known upstream provider events (Matrix Synapse upgrade, Janus restart, LiveKit server issue).
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope of impact
+      options:
+        - single appId / tenant
+        - multiple appIds / tenants
+        - all tenants
+        - unknown
+    validations:
+      required: true
