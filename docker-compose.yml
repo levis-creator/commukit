@@ -43,11 +43,16 @@ services:
     container_name: comms-service
     restart: unless-stopped
     ports:
-      - "${COMMS_SERVICE_PORT:-3014}:3014"
+      - '${COMMS_SERVICE_PORT:-3014}:3014'
     env_file: .env
     environment:
       # Internal service-to-service URLs (Docker network hostnames)
-      DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/vps-comms-db?schema=public
+      # Dedicated schema isolates commukit tables from co-tenants of the
+      # same database (e.g. Kamailio's location/subscriber/version tables
+      # that the postgres init script creates in `public`). entrypoint.sh
+      # runs `CREATE SCHEMA IF NOT EXISTS commukit` before migrations so
+      # the schema exists on first boot.
+      DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/vps-comms-db?schema=commukit
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672
@@ -93,7 +98,7 @@ services:
         condition: service_started
         required: false
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3014/health || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3014/health || exit 1']
       interval: 15s
       timeout: 5s
       retries: 5
@@ -118,9 +123,10 @@ services:
       # Kamailio would otherwise create itself.
       - ./infra/kamailio/init.sql:/docker-entrypoint-initdb.d/10-kamailio.sql:ro
     ports:
-      - "5432:5432"
+      - '5432:5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vps-comms-db}"]
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vps-comms-db}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -134,9 +140,9 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - '6379:6379'
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 3s
       retries: 5
@@ -154,10 +160,10 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - '5672:5672'
+      - '15672:15672'
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
       interval: 30s
       timeout: 10s
       retries: 5
@@ -170,7 +176,7 @@ services:
   synapse:
     image: matrixdotorg/synapse:latest
     container_name: comms-synapse
-    profiles: ["chat"]
+    profiles: ['chat']
     restart: unless-stopped
     entrypoint: /conf/entrypoint.sh
     volumes:
@@ -182,7 +188,7 @@ services:
       MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:-comms.local}
       MATRIX_REGISTRATION_SHARED_SECRET: ${MATRIX_REGISTRATION_SHARED_SECRET:-change-me-registration-secret}
     ports:
-      - "8020:8020"
+      - '8020:8020'
     networks:
       - comms-network
 
@@ -192,7 +198,7 @@ services:
   janus-gateway:
     image: canyan/janus-gateway:latest
     container_name: comms-janus
-    profiles: ["media"]
+    profiles: ['media']
     restart: unless-stopped
     entrypoint: /entrypoint.sh
     volumes:
@@ -217,10 +223,10 @@ services:
         condition: service_healthy
         required: false
     ports:
-      - "8088:8088"     # HTTP API
-      - "8188:8188"     # WebSocket
-      - "10000-10200:10000-10200/udp"  # AudioBridge + VideoRoom RTP/SRTP
-      - "20000-20999:20000-20999/udp"  # SIP plugin RTP (isolated from AudioBridge range)
+      - '8088:8088' # HTTP API
+      - '8188:8188' # WebSocket
+      - '10000-10200:10000-10200/udp' # AudioBridge + VideoRoom RTP/SRTP
+      - '20000-20999:20000-20999/udp' # SIP plugin RTP (isolated from AudioBridge range)
     networks:
       - comms-network
 
@@ -231,7 +237,7 @@ services:
   coturn:
     image: coturn/coturn:latest
     container_name: comms-coturn
-    profiles: ["media"]
+    profiles: ['media']
     restart: unless-stopped
     entrypoint: /entrypoint.sh
     volumes:
@@ -245,9 +251,9 @@ services:
       TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
       TURN_MAX_PORT: ${TURN_MAX_PORT:-49200}
     ports:
-      - "3478:3478"           # STUN/TURN
-      - "3478:3478/udp"
-      - "49160-49200:49160-49200/udp"  # Relay range
+      - '3478:3478' # STUN/TURN
+      - '3478:3478/udp'
+      - '49160-49200:49160-49200/udp' # Relay range
     networks:
       - comms-network
 
@@ -262,7 +268,7 @@ services:
   kamailio:
     image: ghcr.io/kamailio/kamailio-ci:5.7.4-alpine
     container_name: comms-kamailio
-    profiles: ["sip"]
+    profiles: ['sip']
     restart: unless-stopped
     volumes:
       - ./infra/kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
@@ -276,13 +282,13 @@ services:
       DB_NAME: ${POSTGRES_DB:-vps-comms-db}
       SIP_DOMAIN: ${SIP_DOMAIN:-comms.local}
     ports:
-      - "${SIP_HOST_PORT_UDP:-5060}:5060/udp"
-      - "${SIP_HOST_PORT_TCP:-5060}:5060/tcp"
+      - '${SIP_HOST_PORT_UDP:-5060}:5060/udp'
+      - '${SIP_HOST_PORT_TCP:-5060}:5060/tcp'
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "kamcmd core.uptime || exit 1"]
+      test: ['CMD-SHELL', 'kamcmd core.uptime || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -290,8 +296,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
     networks:
       - comms-network
 
@@ -306,24 +312,24 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     container_name: comms-livekit
-    profiles: ["livekit"]
+    profiles: ['livekit']
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     volumes:
       - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-change-me-livekit-secret}"
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-change-me-livekit-secret}'
     ports:
-      - "7880:7880"           # HTTP + WebSocket signaling
-      - "7881:7881"           # TURN/TLS
-      - "50000-50100:50000-50100/udp"  # RTC media (disjoint from Janus 10000-10200)
+      - '7880:7880' # HTTP + WebSocket signaling
+      - '7881:7881' # TURN/TLS
+      - '50000-50100:50000-50100/udp' # RTC media (disjoint from Janus 10000-10200)
     networks:
       - comms-network
 
   livekit-sip:
     image: livekit/sip:latest
     container_name: comms-livekit-sip
-    profiles: ["livekit"]
+    profiles: ['livekit']
     restart: unless-stopped
     network_mode: host
     command: --config /etc/livekit-sip.yaml
