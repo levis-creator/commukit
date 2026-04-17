@@ -3,10 +3,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import { RedisService } from '../redis/redis.service';
-import type {
-  ChatProvider,
-  ChatUserToken,
-} from '../providers/chat-provider.interface';
+import type { ChatProvider, ChatUserToken } from '../providers/chat-provider.interface';
 
 /**
  * MatrixService — Matrix Synapse implementation of the `ChatProvider` contract.
@@ -51,16 +48,17 @@ export class MatrixService implements ChatProvider, OnModuleInit {
   private botAccessToken: string | null = null;
   private botRefreshInFlight: Promise<void> | null = null;
 
-  private readonly roomCache = new _BoundedMap<string, string>(
-    MatrixService.ROOM_CACHE_MAX,
-  );
+  private readonly roomCache = new _BoundedMap<string, string>(MatrixService.ROOM_CACHE_MAX);
   private readonly memberTokenCache = new _BoundedMap<string, string>(
     MatrixService.TOKEN_CACHE_MAX,
   );
 
   constructor(private readonly redis: RedisService) {
     this.serverUrl = (process.env.MATRIX_SERVER_URL ?? 'http://localhost:8020').replace(/\/$/, '');
-    this.publicServerUrl = (process.env.MATRIX_PUBLIC_SERVER_URL ?? this.serverUrl).replace(/\/$/, '');
+    this.publicServerUrl = (process.env.MATRIX_PUBLIC_SERVER_URL ?? this.serverUrl).replace(
+      /\/$/,
+      '',
+    );
     this.serverName = process.env.MATRIX_SERVER_NAME ?? 'comms.local';
     this.botUsername = process.env.MATRIX_BOT_USERNAME ?? 'comms-bot';
 
@@ -125,11 +123,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
    *
    * Returns the Matrix roomId (e.g. `!abc123:comms.local`), or null.
    */
-  async ensureRoom(
-    appId: string,
-    contextId: string,
-    title: string,
-  ): Promise<string | null> {
+  async ensureRoom(appId: string, contextId: string, title: string): Promise<string | null> {
     if (!this.available || !this.botAccessToken) return null;
 
     const scopedKey = `${appId}:${contextId}`;
@@ -178,14 +172,10 @@ export class MatrixService implements ChatProvider, OnModuleInit {
       if (!roomId) throw new Error('No room_id in createRoom response');
 
       this.cacheRoom(scopedKey, cacheKey, roomId);
-      this.logger.log(
-        `Matrix room created for ${appId}/${contextId}: ${roomId}`,
-      );
+      this.logger.log(`Matrix room created for ${appId}/${contextId}: ${roomId}`);
       return roomId;
     } catch (err) {
-      this.logger.error(
-        `Failed to create Matrix room for ${appId}/${contextId}: ${err}`,
-      );
+      this.logger.error(`Failed to create Matrix room for ${appId}/${contextId}: ${err}`);
       return null;
     }
   }
@@ -266,12 +256,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
       if (token) {
         // Rotate off the legacy password: generate a random one and change it.
         const newPassword = this.generatePassword();
-        const rotated = await this.changePassword(
-          username,
-          token,
-          legacyPassword,
-          newPassword,
-        );
+        const rotated = await this.changePassword(username, token, legacyPassword, newPassword);
         if (rotated) {
           // Re-login with the new password to obtain a fresh token bound to it.
           const fresh = await this.loginUser(username, newPassword);
@@ -339,11 +324,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
 
     const flagKey = `comms:matrix:invite:${roomId}:${matrixUserId}`;
     if (this.redis.isReady()) {
-      const acquired = await this.redis.setIfAbsent(
-        flagKey,
-        '1',
-        MatrixService.INVITE_FLAG_TTL,
-      );
+      const acquired = await this.redis.setIfAbsent(flagKey, '1', MatrixService.INVITE_FLAG_TTL);
       if (!acquired) return; // Another replica or recent request already handled this.
     }
 
@@ -384,11 +365,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
    */
   async logoutMember(domainUserId: string, accessToken: string): Promise<void> {
     try {
-      await this.httpPost(
-        '/_matrix/client/v3/logout',
-        {},
-        { accessToken },
-      );
+      await this.httpPost('/_matrix/client/v3/logout', {}, { accessToken });
     } catch (err) {
       this.logger.debug(`Matrix logout failed for ${domainUserId}: ${err}`);
     }
@@ -445,7 +422,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     } else if (res?.errcode === 'M_USER_IN_USE') {
       throw new Error(
         `Bot account @${this.botUsername}:${this.serverName} already exists but login failed. ` +
-        `Check MATRIX_BOT_PASSWORD in .env matches the password used when the account was first created.`,
+          `Check MATRIX_BOT_PASSWORD in .env matches the password used when the account was first created.`,
       );
     } else {
       throw new Error(`Bot registration failed: ${JSON.stringify(res)}`);
@@ -469,13 +446,30 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     return this.botRefreshInFlight;
   }
 
-  private async loginWithRetry(username: string, password: string, maxAttempts = 3): Promise<string | null> {
+  private async loginWithRetry(
+    username: string,
+    password: string,
+    maxAttempts = 3,
+  ): Promise<string | null> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const res = await this.httpPost('/_matrix/client/v3/login', {
-        type: 'm.login.password',
-        identifier: { type: 'm.id.user', user: username },
-        password,
-      });
+      let res: any;
+      try {
+        res = await this.httpPost('/_matrix/client/v3/login', {
+          type: 'm.login.password',
+          identifier: { type: 'm.id.user', user: username },
+          password,
+        });
+      } catch (err) {
+        // Expected "no such account" / "bad password" responses come back
+        // as 400/401/403 from Synapse; `request()` throws on non-2xx. We
+        // translate those into `null` so the caller (e.g. ensureBotAccount)
+        // can fall through to the registration path. Anything else
+        // (network, 5xx) propagates.
+        if (err instanceof MatrixHttpError && [400, 401, 403].includes(err.status)) {
+          return null;
+        }
+        throw err;
+      }
 
       if (res?.access_token) return res.access_token;
 
@@ -497,15 +491,28 @@ export class MatrixService implements ChatProvider, OnModuleInit {
   }
 
   private async loginUser(username: string, password: string): Promise<string | null> {
-    const res = await this.httpPost('/_matrix/client/v3/login', {
-      type: 'm.login.password',
-      identifier: { type: 'm.id.user', user: username },
-      password,
-    });
-    return res?.access_token ?? null;
+    try {
+      const res = await this.httpPost('/_matrix/client/v3/login', {
+        type: 'm.login.password',
+        identifier: { type: 'm.id.user', user: username },
+        password,
+      });
+      return res?.access_token ?? null;
+    } catch (err) {
+      // Treat "account doesn't exist" / "bad password" as a signal to the
+      // caller to register / try another password, not a fatal error.
+      if (err instanceof MatrixHttpError && [400, 401, 403].includes(err.status)) {
+        return null;
+      }
+      throw err;
+    }
   }
 
-  private async registerUser(username: string, password: string, displayName: string): Promise<string | null> {
+  private async registerUser(
+    username: string,
+    password: string,
+    displayName: string,
+  ): Promise<string | null> {
     const nonce = await this.getNonce();
     const mac = this.computeRegistrationMac(nonce, username, password, false);
     const res = await this.httpPost('/_synapse/admin/v1/register', {
@@ -560,7 +567,12 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     return res?.nonce ?? '';
   }
 
-  private computeRegistrationMac(nonce: string, username: string, password: string, admin: boolean): string {
+  private computeRegistrationMac(
+    nonce: string,
+    username: string,
+    password: string,
+    admin: boolean,
+  ): string {
     const hmac = createHmac('sha1', this.registrationSharedSecret);
     hmac.update(nonce);
     hmac.update('\x00');
@@ -613,10 +625,7 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      MatrixService.HTTP_TIMEOUT_MS,
-    );
+    const timer = setTimeout(() => controller.abort(), MatrixService.HTTP_TIMEOUT_MS);
 
     let res: Response;
     try {
@@ -629,7 +638,9 @@ export class MatrixService implements ChatProvider, OnModuleInit {
     } catch (err: any) {
       clearTimeout(timer);
       if (err?.name === 'AbortError') {
-        throw new Error(`Matrix ${method} ${path} timed out after ${MatrixService.HTTP_TIMEOUT_MS}ms`);
+        throw new Error(
+          `Matrix ${method} ${path} timed out after ${MatrixService.HTTP_TIMEOUT_MS}ms`,
+        );
       }
       throw err;
     }
