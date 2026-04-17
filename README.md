@@ -439,4 +439,14 @@ vps-ke-communications-service/
 
 ## License
 
-UNLICENSED - Private project.
+### License
+
+Released under the [Apache License, Version 2.0](LICENSE). You may use, modify, and redistribute this project under the terms of that license.
+
+### Attribution (required)
+
+If you redistribute commukit (source or binary), you must propagate the contents of [`NOTICE`](NOTICE) per Apache-2.0 §4(d). Include the `NOTICE` contents in your distribution's own `NOTICE` file, documentation, or about screen.
+
+### Credit (requested)
+
+We appreciate — but do not require — that adopters credit commukit in their public documentation, release notes, or about pages. See [`CREDITS.md`](CREDITS.md) for the suggested snippet.
