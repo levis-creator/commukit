@@ -10,13 +10,13 @@
 
 port: 7880
 bind_addresses:
-  - ""
+  - ''
 
 rtc:
   # Must match the docker-compose port range for the `livekit` profile.
   udp_port: 7882
   port_range_start: 50000
-  port_range_end: 50100
+  port_range_end: 50098
   use_external_ip: false
 
 # Keys are injected via LIVEKIT_KEYS env var in docker-compose.yml.
